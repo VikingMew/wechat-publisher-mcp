@@ -1,4 +1,4 @@
-import WeChatAPI from '../services/WeChatAPI.js';
+import { getWeChatAPI } from '../services/WeChatAPI.js';
 import { validateStatusParams } from '../utils/validator.js';
 import logger from '../utils/logger.js';
 
@@ -24,11 +24,11 @@ class WeChatStatus {
         throw new Error(`参数验证失败: ${validation.errors.join(', ')}`);
       }
 
-      const { msgId, appId, appSecret } = params;
+      const { msgId } = params;
 
       // 2. 初始化微信API
       logger.debug('初始化微信API');
-      const wechatAPI = new WeChatAPI(appId, appSecret);
+      const wechatAPI = getWeChatAPI();
 
       // 3. 查询发布状态
       logger.debug('查询发布状态', { msgId });

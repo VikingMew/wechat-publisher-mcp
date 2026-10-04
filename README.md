@@ -54,8 +54,8 @@ npm install
 
 # 3. 配置微信公众号密钥
 # ⚠️ 重要安全提示：请勿将真实的AppID和AppSecret提交到代码仓库！
-cp examples/wechat-config.example.js examples/wechat-config.js
-# 编辑 examples/wechat-config.js，填入您的真实密钥
+# 在服务进程环境中设置 WECHAT_APP_ID 和 WECHAT_APP_SECRET
+# 不要将密钥写入项目文件或发送到AI对话
 
 # 4. 创建全局链接
 npm link
@@ -68,29 +68,21 @@ wechat-publisher-mcp --help
 
 **⚠️ 重要：为了保护您的微信公众号安全，请务必正确配置密钥！**
 
-1. **复制配置示例文件**：
+微信公众号凭据只从服务进程环境变量 `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 读取。MCP工具不接受 `appId` / `appSecret` 参数，缺失环境变量时会明确报错。
+
+在启动MCP客户端或服务前，通过客户端的安全环境注入功能或父进程设置这两个变量。不要将真实密钥贴进AI对话、写入项目配置文件或提交到仓库。`scripts/setup.sh` 不再生成或读取 `config.json`。
+
+终端临时设置示例（Bash，隐藏密钥输入，不将密钥字面量写入命令历史）：
 ```bash
-cp examples/wechat-config.example.js examples/wechat-config.js
+read -r -p 'WECHAT_APP_ID: ' WECHAT_APP_ID
+read -r -s -p 'WECHAT_APP_SECRET: ' WECHAT_APP_SECRET; echo
+export WECHAT_APP_ID WECHAT_APP_SECRET
+node src/server.js
 ```
 
-2. **编辑配置文件**，填入您的真实密钥：
-```javascript
-// examples/wechat-config.js
-export const wechatConfig = {
-  appId: 'your_real_appid_here',        // 替换为您的真实AppID
-  appSecret: 'your_real_appsecret_here' // 替换为您的真实AppSecret
-};
-```
+自定义封面只能读取 `WECHAT_COVER_DIR` 指定目录内的文件；未设置时限制在服务工作目录下的 `covers/`。请先创建目录并放入图片，使用 `./covers/cover.png` 或目录内的绝对路径。拒绝 `..`、越界符号链接、超过1MB的文件和魔数不匹配的图片，仅接受PNG/JPEG/GIF/WebP。校验或上传失败会中止，不会静默继续发布。自动生成封面使用服务自己生成的路径。
 
-3. **在代码中引用配置**：
-```javascript
-import { wechatConfig } from './examples/wechat-config.js';
-const { appId, appSecret } = wechatConfig;
-```
-
-4. **确保配置文件不被提交**：
-   - `examples/wechat-config.js` 已添加到 `.gitignore`
-   - 只有示例文件 `examples/wechat-config.example.js` 会被提交到仓库
+默认只走预览路径，必须提供 `previewOpenId`。真实发布需要同时设置 `previewMode: false` 和 `confirmPublish: true`；缺少确认时提示“未发布，缺少 confirmPublish”。
 
 ### 方式二：直接运行
 
@@ -405,17 +397,15 @@ wechat-publisher-mcp --help
 
 ### 第六步：发布第一篇文章
 
-在AI工具中输入以下内容（替换为你的实际信息）：
+先在服务进程环境中设置 `WECHAT_APP_ID` / `WECHAT_APP_SECRET`，再在AI工具中输入以下内容（不包含凭据）：
 
 ```
 请帮我发布一篇测试文章到微信公众号：
 
 标题：我的第一篇AI发布文章
 作者：你的名字
-AppID：你的微信公众号AppID
-AppSecret：你的微信公众号AppSecret
 预览模式：true
-预览用户OpenID：你的OpenID（可选，用于预览）
+预览用户OpenID：你的OpenID（预览必需）
 
 内容：
 # 欢迎使用微信公众号自动发布工具
@@ -479,11 +469,10 @@ A: 可以通过微信公众号的用户管理功能获取，或者先不使用�
 |--------|------|------|------|
 | title | string | ✅ | 文章标题（最大64字符） |
 | content | string | ✅ | 文章内容（Markdown格式） |
-| appId | string | ✅ | 微信公众号AppID |
-| appSecret | string | ✅ | 微信公众号AppSecret |
 | author | string | ❌ | 作者名称（最大8字符） |
 | coverImagePath | string | ❌ | 封面图片路径 |
-| previewMode | boolean | ❌ | 是否预览模式（默认false） |
+| previewMode | boolean | ❌ | 是否预览模式（默认true） |
+| confirmPublish | boolean | ❌ | 真实发布必须显式为true，且previewMode为false（默认false） |
 | previewOpenId | string | ❌ | 预览用户OpenID（预览模式必需） |
 
 **返回值：**
@@ -507,8 +496,6 @@ A: 可以通过微信公众号的用户管理功能获取，或者先不使用�
 | 参数名 | 类型 | 必需 | 说明 |
 |--------|------|------|------|
 | msgId | string | ✅ | 消息ID |
-| appId | string | ✅ | 微信公众号AppID |
-| appSecret | string | ✅ | 微信公众号AppSecret |
 
 **返回值：**
 
@@ -548,10 +535,12 @@ A: 可以通过微信公众号的用户管理功能获取，或者先不使用�
 在AI工具中说："请发布这篇文章到微信公众号"，并提供：
 - 标题：🔥 AI赋能Chrome扩展开发：从PromptX到功能实现的全流程实战教程
 - 作者：郑伟 | PromptX技术  
-- AppID：your_wechat_appid_here（请替换为您的真实AppID）
-- AppSecret：your_wechat_appsecret_here（请替换为您的真实AppSecret）
-- 封面图：./cover.png
+- 封面图：./covers/cover.png
+- 预览模式：true
+- 预览用户OpenID：你的OpenID
 - 内容：[Markdown内容]
+
+预览确认后，显式传入previewMode: false和confirmPublish: true执行真实发布。凭据已由服务环境提供。
 
 ## 步骤4：查询状态
 发布后使用返回的msgId查询文章状态和数据。
@@ -576,6 +565,9 @@ AI会自动：
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
+| WECHAT_APP_ID | 无 | 必需，微信公众号AppID |
+| WECHAT_APP_SECRET | 无 | 必需，微信公众号AppSecret，只通过服务环境提供 |
+| WECHAT_COVER_DIR | ./covers | 自定义封面允许目录，相对于服务工作目录 |
 | LOG_LEVEL | INFO | 日志级别（ERROR/WARN/INFO/DEBUG） |
 | NO_COLOR | 0 | 禁用彩色输出（设为1禁用） |
 | NODE_ENV | development | 运行环境 |

@@ -46,71 +46,11 @@ fi
 echo "✅ 依赖安装完成"
 echo ""
 
-# 创建配置文件
-echo "⚙️  创建配置文件..."
-
-# 检查是否已有配置文件
-if [ ! -f "config.json" ]; then
-    cat > config.json << EOF
-{
-  "appId": "",
-  "appSecret": "",
-  "previewOpenId": "",
-  "logLevel": "INFO"
-}
-EOF
-    echo "✅ 已创建 config.json 配置文件"
-else
-    echo "⚠️  config.json 已存在，跳过创建"
-fi
-
-echo ""
-
-# 提示用户配置
-echo "🔧 配置微信公众号信息"
-echo "======================"
-echo ""
-echo "请按照以下步骤配置您的微信公众号："
-echo ""
-echo "1. 登录微信公众平台: https://mp.weixin.qq.com"
-echo "2. 进入 '开发' → '基本配置'"
-echo "3. 获取 AppID 和 AppSecret"
-echo "4. 编辑 config.json 文件，填入您的信息"
-echo ""
-
-# 检查是否需要交互式配置
-read -p "是否现在配置微信公众号信息? (y/n): " configure_now
-
-if [ "$configure_now" = "y" ] || [ "$configure_now" = "Y" ]; then
-    echo ""
-    echo "📝 请输入您的微信公众号信息："
-    
-    read -p "AppID (以wx开头): " app_id
-    read -p "AppSecret (32位字符串): " app_secret
-    read -p "预览用户OpenID (可选): " preview_openid
-    
-    # 验证输入
-    if [[ ! $app_id =~ ^wx[a-zA-Z0-9]{16}$ ]]; then
-        echo "⚠️  AppID格式可能不正确，请检查"
-    fi
-    
-    if [ ${#app_secret} -ne 32 ]; then
-        echo "⚠️  AppSecret长度不是32位，请检查"
-    fi
-    
-    # 更新配置文件
-    cat > config.json << EOF
-{
-  "appId": "$app_id",
-  "appSecret": "$app_secret",
-  "previewOpenId": "$preview_openid",
-  "logLevel": "INFO"
-}
-EOF
-    
-    echo "✅ 配置已保存到 config.json"
-fi
-
+# 凭据只通过启动服务的父进程环境提供，不读取或生成config.json。
+echo "🔧 请在启动MCP客户端/服务前设置环境变量："
+echo "   WECHAT_APP_ID、WECHAT_APP_SECRET（必需）"
+echo "   WECHAT_COVER_DIR（可选，默认工作目录下的covers/）"
+echo "   请使用客户端的安全环境注入功能，不要把密钥贴入AI对话或写入项目文件。"
 echo ""
 
 # MCP客户端配置提示
@@ -150,46 +90,11 @@ EOF
 
 echo ""
 
-# 测试连接
-echo "🧪 测试配置"
-echo "==========="
-echo ""
-
-if [ -f "config.json" ]; then
-    # 检查配置文件是否有效
-    if grep -q '"appId": ""' config.json; then
-        echo "⚠️  检测到空的AppID，请先完成配置再测试"
-    else
-        read -p "是否运行连接测试? (y/n): " run_test
-        
-        if [ "$run_test" = "y" ] || [ "$run_test" = "Y" ]; then
-            echo "🔄 正在测试微信API连接..."
-            
-            # 创建简单的测试脚本
-            cat > test_connection.js << 'EOF'
-const WeChatAPI = require('./src/services/WeChatAPI.js');
-const config = require('./config.json');
-
-async function testConnection() {
-  try {
-    const api = new WeChatAPI(config.appId, config.appSecret);
-    const token = await api.getAccessToken();
-    console.log('✅ 微信API连接成功！');
-    console.log('🔑 Access Token获取成功');
-    return true;
-  } catch (error) {
-    console.log('❌ 微信API连接失败:', error.message);
-    return false;
-  }
-}
-
-testConnection();
-EOF
-            
-            node test_connection.js
-            rm test_connection.js
-        fi
-    fi
+# 只检查环境变量是否存在，不生成带凭据的测试脚本，也不输出密钥。
+if [ -z "${WECHAT_APP_ID:-}" ] || [ -z "${WECHAT_APP_SECRET:-}" ]; then
+    echo "⚠️  当前环境缺少WECHAT_APP_ID或WECHAT_APP_SECRET，请在服务启动环境中设置"
+else
+    echo "✅ 当前环境已提供微信凭据（未执行联网测试）"
 fi
 
 echo ""
@@ -199,7 +104,7 @@ echo "🎉 安装配置完成！"
 echo "================="
 echo ""
 echo "下一步："
-echo "1. 确保 config.json 中的信息正确"
+echo "1. 确保服务进程获得WECHAT_APP_ID和WECHAT_APP_SECRET环境变量"
 echo "2. 在微信公众平台配置IP白名单"
 echo "3. 将MCP服务添加到您的AI工具配置中"
 echo "4. 重启AI工具以加载MCP服务"

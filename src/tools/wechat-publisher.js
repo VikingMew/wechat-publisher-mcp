@@ -1,6 +1,6 @@
-import WeChatAPI from '../services/WeChatAPI.js';
+import { getWeChatAPI } from '../services/WeChatAPI.js';
 import MarkdownConverter from '../services/MarkdownConverter.js';
-import { validatePublishParams } from '../utils/validator.js';
+import { validatePublishParams, validateFilePath } from '../utils/validator.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -17,23 +17,9 @@ class WeChatPublisher {
     const startTime = Date.now();
     
     try {
-      // 详细记录调用参数（隐藏敏感信息）
-      const logParams = {
-        title: params.title,
-        author: params.author,
-        contentLength: params.content ? params.content.length : 0,
-        contentPreview: params.content ? params.content.substring(0, 100) + '...' : '',
-        appId: params.appId ? params.appId.substring(0, 8) + '***' : 'undefined',
-        appSecret: params.appSecret ? '***已提供***' : 'undefined',
-        coverImagePath: params.coverImagePath || 'undefined',
-        previewMode: params.previewMode || false,
-        previewOpenId: params.previewOpenId || 'undefined'
-      };
-      
-      logger.info('=== MCP调用开始 ===');
-      logger.info('调用参数详情', logParams);
-      logger.info('开始发布流程', { title: params.title });
-      
+      const previewMode = params.previewMode !== false || params.confirmPublish !== true;
+      logger.info('开始发布流程', { previewMode });
+
       // 1. 参数验证
       const validation = validatePublishParams(params);
       if (!validation.valid) {
@@ -44,16 +30,13 @@ class WeChatPublisher {
         title,
         content, 
         author,
-        appId,
-        appSecret,
         coverImagePath,
-        previewMode = false,
         previewOpenId
       } = params;
 
       // 2. 初始化微信API
       logger.debug('初始化微信API');
-      const wechatAPI = new WeChatAPI(appId, appSecret);
+      const wechatAPI = getWeChatAPI();
 
       // 3. 转换Markdown为微信HTML
       logger.debug('转换Markdown内容');
@@ -66,6 +49,15 @@ class WeChatPublisher {
       // 4. 处理封面图 - 如果没有提供封面图，则自动生成
       let thumbMediaId = null;
       let coverPath = coverImagePath;
+      let validatedBuffer;
+      if (coverImagePath !== undefined) {
+        const coverValidation = await validateFilePath(coverImagePath);
+        if (!coverValidation.valid) {
+          throw new Error(coverValidation.errors.join(', '));
+        }
+        coverPath = coverValidation.resolvedPath;
+        validatedBuffer = coverValidation.imageBuffer;
+      }
       
       if (!coverPath) {
         // 自动生成封面图
@@ -76,7 +68,7 @@ class WeChatPublisher {
       if (coverPath) {
         try {
           logger.debug('开始上传封面图', { path: coverPath });
-          thumbMediaId = await wechatAPI.uploadCoverImage(coverPath);
+          thumbMediaId = await wechatAPI.uploadCoverImage(coverPath, validatedBuffer);
           logger.info('封面图上传成功', { mediaId: thumbMediaId });
           
           // 如果是自动生成的封面图，上传后删除临时文件
@@ -90,8 +82,7 @@ class WeChatPublisher {
             }
           }
         } catch (error) {
-          logger.warn('封面图上传失败，将继续发布', { error: error.message });
-          // 不抛出错误，继续发布流程
+          throw new Error(`封面图上传失败，未发布: ${error.message}`);
         }
       }
 
@@ -99,7 +90,7 @@ class WeChatPublisher {
       let result;
       if (previewMode) {
         if (!previewOpenId) {
-          throw new Error('预览模式需要提供previewOpenId参数');
+          throw new Error('未发布，预览模式需要提供previewOpenId参数');
         }
         
         logger.debug('开始预览文章', { previewOpenId });
@@ -140,7 +131,7 @@ class WeChatPublisher {
       return {
         content: [{
           type: "text",
-          text: successMessage
+          text: (previewMode && params.confirmPublish !== true ? '未发布，缺少 confirmPublish；已走预览路径。\n' : '') + successMessage
         }]
       };
 
@@ -253,10 +244,10 @@ class WeChatPublisher {
       
       // 创建Canvas并生成PNG图片
       const timestamp = Date.now();
-      const coverPath = path.default.join(process.cwd(), `auto-cover-${timestamp}.png`);
+      let coverPath = path.default.join(process.cwd(), `auto-cover-${timestamp}.png`);
       
       // 使用Canvas API生成PNG图片
-      await WeChatPublisher.createPngCover({
+      coverPath = await WeChatPublisher.createPngCover({
         title: shortTitle,
         subtitle: subtitle.substring(0, 30),
         theme,
@@ -274,7 +265,6 @@ class WeChatPublisher {
       
       logger.info('自动生成封面图成功', { 
         coverPath, 
-        title: shortTitle, 
         size: `${fileSizeInMB.toFixed(2)}MB` 
       });
       return coverPath;
@@ -352,11 +342,12 @@ class WeChatPublisher {
       const fs = await import('fs/promises');
       const buffer = canvas.toBuffer('image/png');
       await fs.writeFile(outputPath, buffer);
+      return outputPath;
       
     } catch (error) {
       logger.error('创建PNG封面图失败，回退到SVG', { error: error.message });
       // 回退到SVG格式
-      await WeChatPublisher.createSvgCover({ title, subtitle, theme, outputPath });
+      return await WeChatPublisher.createSvgCover({ title, subtitle, theme, outputPath });
     }
   }
   

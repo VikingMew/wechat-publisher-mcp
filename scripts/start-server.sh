@@ -10,60 +10,28 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Default values
-TRANSPORT="stdio"
-PORT="3000"
-HOST="localhost"
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --transport)
-      TRANSPORT="$2"
-      shift 2
-      ;;
-    --port)
-      PORT="$2"
-      shift 2
-      ;;
-    --host)
-      HOST="$2"
-      shift 2
-      ;;
-    *)
-      echo -e "${RED}Unknown argument: $1${NC}"
-      exit 1
-      ;;
-  esac
-done
-
-echo -e "${YELLOW}🚀 Starting WeChat Publisher MCP Server...${NC}"
-echo -e "${YELLOW}📁 Project root: $PROJECT_ROOT${NC}"
-echo -e "${YELLOW}🔌 Transport: $TRANSPORT${NC}"
-
-if [ "$TRANSPORT" != "stdio" ]; then
-  echo -e "${YELLOW}🌐 Host: $HOST${NC}"
-  echo -e "${YELLOW}🔧 Port: $PORT${NC}"
-fi
-
-# Check if package.json exists
-if [[ ! -f "$PROJECT_ROOT/package.json" ]]; then
-  echo -e "${RED}❌ Error: package.json not found in $PROJECT_ROOT${NC}"
-  echo -e "${RED}   Please make sure you're running the script from the correct directory${NC}"
+# 服务仅支持stdio；MCP_TRANSPORT/MCP_PORT/MCP_HOST未被代码读取。
+# 启动提示写入stderr，stdout留给JSON-RPC。
+if [[ $# -gt 0 ]]; then
+  echo "不支持启动参数；此服务仅支持stdio" >&2
   exit 1
 fi
 
-# Check if node_modules exists, if not install dependencies
-if [[ ! -d "$PROJECT_ROOT/node_modules" ]]; then
-  echo -e "${YELLOW}📦 Installing dependencies...${NC}"
-  cd "$PROJECT_ROOT" && npm install
+echo -e "${YELLOW}🚀 Starting WeChat Publisher MCP Server (stdio)...${NC}" >&2
+
+# Check if package.json exists
+if [[ ! -f "$PROJECT_ROOT/package.json" ]]; then
+  echo -e "${RED}❌ Error: package.json not found in $PROJECT_ROOT${NC}" >&2
+  echo -e "${RED}   Please make sure you're running the script from the correct directory${NC}" >&2
+  exit 1
 fi
 
-# Export environment variables
-export MCP_TRANSPORT="$TRANSPORT"
-export MCP_PORT="$PORT"
-export MCP_HOST="$HOST"
+# 启动过程不自动安装依赖，避免污染stdout或隐式联网。
+if [[ ! -d "$PROJECT_ROOT/node_modules" ]]; then
+  echo -e "${RED}❌ 缺少node_modules，请先单独安装依赖${NC}" >&2
+  exit 1
+fi
 
 # Start the server
-echo -e "${GREEN}✅ Starting server...${NC}"
-cd "$PROJECT_ROOT" && node src/server.js 
+echo -e "${GREEN}✅ Starting server...${NC}" >&2
+cd "$PROJECT_ROOT" && exec node src/server.js 

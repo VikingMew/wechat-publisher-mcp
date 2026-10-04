@@ -7,7 +7,7 @@
   "extends": "eslint:recommended",
   "parserOptions": {
     "ecmaVersion": "latest",
-    "sourceType": "commonjs"
+    "sourceType": "module"
   },
   "rules": {
     "indent": ["error", 2],

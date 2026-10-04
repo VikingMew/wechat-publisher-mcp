@@ -2,20 +2,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 import { z } from 'zod';
 import WeChatPublisher from './tools/wechat-publisher.js';
 import WeChatStatus from './tools/wechat-status.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// 简单的日志函数
-const logger = {
-  info: (msg, data) => console.log(`[INFO] ${msg}`, data || ''),
-  error: (msg, error) => console.error(`[ERROR] ${msg}`, error || ''),
-  debug: (msg, data) => process.env.DEBUG && console.log(`[DEBUG] ${msg}`, data || '')
-};
+import logger from './utils/logger.js';
 
 // 创建MCP服务器
 const server = new McpServer({
@@ -32,16 +23,15 @@ server.registerTool(
       title: z.string().describe("文章标题"),
       content: z.string().describe("Markdown格式的文章内容"),
       author: z.string().describe("作者名称"),
-      appId: z.string().describe("微信公众号AppID"),
-      appSecret: z.string().describe("微信公众号AppSecret"),
       coverImagePath: z.string().optional().describe("封面图片路径"),
-      previewMode: z.boolean().default(false).describe("是否为预览模式"),
+      previewMode: z.boolean().default(true).describe("是否为预览模式"),
+      confirmPublish: z.boolean().default(false).describe("真实发布必须显式为true，并设置previewMode为false"),
       previewOpenId: z.string().optional().describe("预览用户OpenID")
     }
   },
   async (params) => {
-    const { title, content, author, appId, appSecret, coverImagePath, previewMode, previewOpenId } = params;
-    logger.info(`Publishing article: ${title}`);
+    const { title, content, author, coverImagePath, previewMode, confirmPublish, previewOpenId } = params;
+    logger.info('收到文章发布请求');
     
     try {
       // 调用实际的发布逻辑
@@ -49,10 +39,9 @@ server.registerTool(
         title,
         content,
         author,
-        appId,
-        appSecret,
         coverImagePath,
         previewMode,
+        confirmPublish,
         previewOpenId
       });
       
@@ -77,20 +66,16 @@ server.registerTool(
     description: "查询文章发布状态和统计数据",
     inputSchema: {
       msgId: z.string().describe("消息ID"),
-      appId: z.string().describe("微信公众号AppID"),
-      appSecret: z.string().describe("微信公众号AppSecret")
     }
   },
   async (params) => {
-    const { msgId, appId, appSecret } = params;
+    const { msgId } = params;
     logger.info(`Querying status for message: ${msgId}`);
     
     try {
       // 调用实际的查询逻辑
       const result = await WeChatStatus.query({
-        msgId,
-        appId,
-        appSecret
+        msgId
       });
       
       return result;

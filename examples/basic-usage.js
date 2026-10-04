@@ -8,14 +8,13 @@
  * 注意：实际使用时，通常通过MCP协议从AI工具调用，而不是直接调用
  */
 
-const WeChatPublisher = require('../src/tools/wechat-publisher.js');
-const WeChatStatus = require('../src/tools/wechat-status.js');
+import WeChatPublisher from '../src/tools/wechat-publisher.js';
+import { fileURLToPath } from 'url';
+import WeChatStatus from '../src/tools/wechat-status.js';
 
-// 示例配置（请替换为您的实际配置）
+// 凭据由工具从WECHAT_APP_ID/WECHAT_APP_SECRET读取，不传入工具参数。
 const config = {
-  appId: 'your_wechat_appid_here',  // 替换为您的AppID
-  appSecret: 'your_wechat_appsecret_here',  // 替换为您的AppSecret
-  // previewOpenId: 'your_preview_openid_here'  // 预览模式需要
+  previewOpenId: process.env.WECHAT_PREVIEW_OPEN_ID
 };
 
 // 示例文章内容
@@ -43,8 +42,8 @@ const result = await publisher.publish({
   title: '文章标题',
   content: markdownContent,
   author: '作者名称',
-  appId: 'your_app_id',
-  appSecret: 'your_app_secret'
+  previewMode: true,
+  previewOpenId: process.env.WECHAT_PREVIEW_OPEN_ID
 });
 \`\`\`
 
@@ -53,9 +52,7 @@ const result = await publisher.publish({
 \`\`\`javascript
 // 查询状态
 const status = await publisher.queryStatus({
-  msgId: result.msgId,
-  appId: 'your_app_id',
-  appSecret: 'your_app_secret'
+  msgId: result.msgId
 });
 \`\`\`
 
@@ -84,9 +81,9 @@ async function example1_basicPublish() {
     const result = await WeChatPublisher.publish({
       title: '🔥 AI赋能内容创作：微信公众号自动发布实战教程',
       content: articleContent,
-      author: 'PromptX技术团队',
+      author: '技术团队',
       ...config,
-      previewMode: false  // 正式发布模式
+      previewMode: true  // 正式发布须显式设置false和confirmPublish: true
     });
 
     console.log('✅ 发布成功！');
@@ -156,15 +153,15 @@ async function example4_withCoverImage() {
   
   try {
     // 注意：这里需要提供真实存在的图片文件路径
-    const coverImagePath = './cover-example.png';
+    const coverImagePath = './covers/cover-example.png';
     
     const result = await WeChatPublisher.publish({
       title: '🎨 带封面图的精美文章',
       content: articleContent,
-      author: 'PromptX设计团队',
+      author: '设计团队',
       coverImagePath,  // 添加封面图
       ...config,
-      previewMode: false
+      previewMode: true
     });
 
     console.log('✅ 带封面图发布成功！');
@@ -186,8 +183,8 @@ async function runExamples() {
   console.log('=====================================\n');
   
   // 检查配置
-  if (!config.appId || !config.appSecret) {
-    console.error('❌ 请先配置您的微信公众号AppID和AppSecret');
+  if (!process.env.WECHAT_APP_ID || !process.env.WECHAT_APP_SECRET) {
+    console.error('❌ 请先设置环境变量WECHAT_APP_ID和WECHAT_APP_SECRET');
     process.exit(1);
   }
   
@@ -218,11 +215,11 @@ async function runExamples() {
 }
 
 // 如果直接运行此文件，执行示例
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runExamples();
 }
 
-module.exports = {
+export {
   example1_basicPublish,
   example2_previewMode,
   example3_queryStatus,

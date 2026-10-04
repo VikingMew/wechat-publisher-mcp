@@ -1,12 +1,12 @@
 /**
  * 日志工具
- * 提供统一的日志记录功能，支持不同级别的日志输出
+ * 所有级别仅写入stderr，stdout保留给MCP JSON-RPC协议
  */
 
 const logger = {
   info: (message, ...args) => {
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`[INFO] ${message}`, ...args);
+      console.error(`[INFO] ${message}`, ...args);
     }
   },
   
@@ -20,12 +20,12 @@ const logger = {
   
   debug: (message, ...args) => {
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${message}`, ...args);
+      console.error(`[DEBUG] ${message}`, ...args);
     }
   },
   
   warn: (message, ...args) => {
-    console.warn(`[WARN] ${message}`, ...args);
+    console.error(`[WARN] ${message}`, ...args);
   }
 };
 

@@ -9,7 +9,6 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "start:http": "MCP_TRANSPORT=http node src/server.js",
     "dev": "node --inspect src/server.js",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -44,12 +43,10 @@
   },
   "homepage": "https://github.com/Deepractice/PromptX#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "latest",
+    "@modelcontextprotocol/sdk": "1.15.0",
     "axios": "^1.10.0",
     "canvas": "^3.1.2",
-    "express": "^4.18.2",
     "form-data": "^4.0.3",
-    "winston": "^3.11.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

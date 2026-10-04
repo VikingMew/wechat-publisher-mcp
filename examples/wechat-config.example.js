@@ -1,16 +1,14 @@
 /**
  * 微信公众号配置示例
- * 请复制此文件并重命名为实际的配置文件，然后填入真实的AppID和AppSecret
+ * 凭据只从服务进程环境读取，不在文件中填写真实密钥
  */
 
 export const wechatConfig = {
-  // 微信公众号AppID（请替换为您的真实AppID）
-  appId: 'your_wechat_appid_here',
+  // 微信公众号AppID环境变量
+  appId: process.env.WECHAT_APP_ID,
   
-  // 微信公众号AppSecret（请替换为您的真实AppSecret）
-  appSecret: 'your_wechat_appsecret_here'
+  // 微信公众号AppSecret环境变量
+  appSecret: process.env.WECHAT_APP_SECRET
 };
 
-// 使用示例：
-// import { wechatConfig } from './wechat-config.js';
-// const { appId, appSecret } = wechatConfig;
+// MCP工具自动读取上述环境变量，无需将凭据作为工具参数传入。
