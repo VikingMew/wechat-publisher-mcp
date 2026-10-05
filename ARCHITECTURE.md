@@ -2,7 +2,15 @@
 
 ## 系统架构概览
 
-WeChat Publisher MCP是一个基于Model Context Protocol (MCP)标准的微信公众号自动发布服务，采用分层架构设计，提供高度可扩展和易于集成的微信内容发布能力。
+WeChat Publisher MCP是一个基于Model Context Protocol (MCP)标准的微信公众号发布服务。仓库只负责将输入内容转换为微信接口可消费的最小HTML结构，并调用微信预览、草稿、发布和状态查询接口；文章主题、排版、美化和视觉素材生成由调用方负责。
+
+## 设计归属与文档对齐
+
+本文件登记为微信发布链路的 L3 owning design。仓库当前没有独立的 `docs/*-design.md`；面向 agent 的职责契约由 VIK-23 在 `AGENTS.md` 登记。
+
+| 行为边界 | 实现位置 | 对齐文档 |
+|----------|----------|----------|
+| Markdown最小语义结构转换、显式封面上传、微信预览/发布/状态调用 | `src/services/MarkdownConverter.js`、`src/tools/wechat-publisher.js`、`src/services/WeChatAPI.js` | `ARCHITECTURE.md`、`README.md`、`examples/basic-usage.js` |
 
 ## 架构图
 
@@ -67,7 +75,7 @@ WeChat Publisher MCP是一个基于Model Context Protocol (MCP)标准的微信�
 **功能**:
 - 文章发布到微信公众号
 - 支持预览模式和正式发布
-- 封面图片自动上传
+- 显式封面图片校验与上传；未提供时不生成或上传封面
 - Markdown内容格式转换
 
 **输入参数**:
@@ -132,17 +140,11 @@ class WeChatAPI {
 #### 3.2 MarkdownConverter.js (格式转换服务)
 
 **转换能力**:
-- Markdown → 微信富文本HTML
-- 移动端样式优化
-- 代码块语法高亮
-- 表格响应式处理
-- 图片自适应缩放
+- Markdown标题、段落、强调、列表、引用、链接和表格 → 语义HTML标签
+- 代码块和行内代码 → HTML代码标签，代码内容进行HTML转义
+- 转换后的标签嵌套清理
 
-**样式特点**:
-- 符合微信公众号显示规范
-- 现代化的视觉设计
-- 良好的移动端体验
-- 代码块专业显示效果
+转换器不注入内联视觉样式、全局 `<style>`、标题装饰符号或主题；最终视觉效果由调用方内容和微信客户端决定。
 
 ### 4. Utils Layer (工具层)
 
@@ -175,7 +177,7 @@ class WeChatAPI {
    ↓
 5. MarkdownConverter转换内容格式
    ↓
-6. WeChatAPI上传封面图片
+6. 如调用方显式提供封面，WeChatAPI上传封面图片
    ↓
 7. WeChatAPI创建草稿
    ↓
@@ -315,4 +317,4 @@ AI工具 ←→ MCP服务 ←→ 微信API
 ### 3. 智能化提升
 - AI内容优化建议
 - 自动SEO优化
-- 用户行为分析 
+- 用户行为分析

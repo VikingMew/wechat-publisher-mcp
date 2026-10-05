@@ -31,12 +31,12 @@
 ### ✨ 核心特性
 
 - 🚀 **即插即用**：标准MCP协议，一键集成到任何AI工具
-- 📝 **智能转换**：自动将Markdown转换为微信公众号优化HTML
-- 🖼️ **封面处理**：自动上传和处理封面图片
+- 📝 **结构转换**：将Markdown标题、段落、强调、列表、引用、链接、表格和代码转换为微信接口可消费的语义HTML
+- 🖼️ **显式封面**：校验并上传调用方提供的封面图片
 - 👀 **预览模式**：支持预览和正式发布两种模式
 - 📊 **状态查询**：实时查询文章发布状态和数据统计
 - 🔧 **错误处理**：完善的错误提示和解决建议
-- 📱 **移动优化**：针对微信公众号移动端阅读体验优化
+- 🔗 **微信协议链路**：调用微信预览、草稿、发布和状态查询接口
 
 ## 📦 安装
 
@@ -80,7 +80,7 @@ export WECHAT_APP_ID WECHAT_APP_SECRET
 node src/server.js
 ```
 
-自定义封面只能读取 `WECHAT_COVER_DIR` 指定目录内的文件；未设置时限制在服务工作目录下的 `covers/`。请先创建目录并放入图片，使用 `./covers/cover.png` 或目录内的绝对路径。拒绝 `..`、越界符号链接、超过1MB的文件和魔数不匹配的图片，仅接受PNG/JPEG/GIF/WebP。校验或上传失败会中止，不会静默继续发布。自动生成封面使用服务自己生成的路径。
+显式提供的封面只能读取 `WECHAT_COVER_DIR` 指定目录内的文件；未设置时限制在服务工作目录下的 `covers/`。请先创建目录并放入图片，使用 `./covers/cover.png` 或目录内的绝对路径。拒绝 `..`、越界符号链接、超过1MB的文件和魔数不匹配的图片，仅接受PNG/JPEG/GIF/WebP。校验或上传失败会中止，不会静默继续发布；未提供 `coverImagePath` 时不会生成或上传封面。
 
 默认只走预览路径，必须提供 `previewOpenId`。真实发布需要同时设置 `previewMode: false` 和 `confirmPublish: true`；缺少确认时提示“未发布，缺少 confirmPublish”。
 
@@ -470,7 +470,7 @@ A: 可以通过微信公众号的用户管理功能获取，或者先不使用�
 | title | string | ✅ | 文章标题（最大64字符） |
 | content | string | ✅ | 文章内容（Markdown格式） |
 | author | string | ❌ | 作者名称（最大8字符） |
-| coverImagePath | string | ❌ | 封面图片路径 |
+| coverImagePath | string | ❌ | 调用方显式提供的封面图片路径；省略时不生成或上传封面 |
 | previewMode | boolean | ❌ | 是否预览模式（默认true） |
 | confirmPublish | boolean | ❌ | 真实发布必须显式为true，且previewMode为false（默认false） |
 | previewOpenId | string | ❌ | 预览用户OpenID（预览模式必需） |
@@ -553,7 +553,7 @@ A: 可以通过微信公众号的用户管理功能获取，或者先不使用�
 
 AI会自动：
 1. 解析用户需求
-2. 转换Markdown为微信HTML
+2. 将Markdown语义结构转换为无视觉装饰的HTML标签
 3. 上传封面图（如果提供）
 4. 发送预览消息
 5. 返回预览结果和链接

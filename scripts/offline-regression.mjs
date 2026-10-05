@@ -12,7 +12,6 @@ const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'wechat-security-'));
 const logs = [];
 const requests = [];
 const env = { DEBUG: '1', WECHAT_APP_ID: 'wx1234567890abcdef', WECHAT_APP_SECRET: 'a'.repeat(32) };
-let canvasMode = 'missing';
 let failUpload = false;
 let tokenRequests = 0;
 const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
@@ -65,14 +64,6 @@ function synthetic(key, values) {
   }, { context, identifier: key });
 }
 async function load(specifier, ref = pathToFileURL(root + '/').href) {
-  if (specifier === 'canvas') {
-    if (canvasMode === 'missing') throw new Error('offline: canvas missing');
-    return synthetic('canvas', { default: {}, createCanvas() {
-      if (canvasMode === 'broken') throw new Error('offline: canvas rendering failed');
-      const ctx = new Proxy({}, { get: (_, key) => key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : () => {} });
-      return { getContext: () => ctx, toBuffer: () => png };
-    } });
-  }
   const key = specifier.startsWith('.') || specifier.startsWith('file:') ? new URL(specifier, ref).href : specifier;
   if (cache.has(key)) return cache.get(key);
   let module;
@@ -104,6 +95,7 @@ let passed = 0;
 async function check(name, fn) { await fn(); passed++; console.log(`PASS ${name}`); }
 try {
   const { default: Publisher } = await entry('src/tools/wechat-publisher.js');
+  const { default: MarkdownConverter } = await entry('src/services/MarkdownConverter.js');
   const { default: Status } = await entry('src/tools/wechat-status.js');
   const { getWeChatAPI } = await entry('src/services/WeChatAPI.js');
   const { validateFilePath, sanitizeParams } = await entry('src/utils/validator.js');
@@ -202,18 +194,29 @@ try {
     assert.equal(fail.isError, true); assert.match(fail.content[0].text, /未发布/);
     assert.ok(!requests.slice(before).some(r => r.url.includes('freepublish/submit'))); failUpload = false;
   });
-  await check('PNG成功、canvas缺失/异常均返回实际路径，SVG上传路径正确', async () => {
-    for (const mode of ['ready', 'missing', 'broken']) {
-      canvasMode = mode;
-      const actual = await Publisher.generateCoverImage('封面', '离线测试正文');
-      assert.ok(actual.endsWith(mode === 'ready' ? '.png' : '.svg')); await fs.stat(actual); await fs.unlink(actual);
+  await check('语义HTML无视觉装饰；无封面不上传，显式封面仍上传', async () => {
+    const html = MarkdownConverter.convertToWeChatHTML(`# 一级\n\n## 二级\n\n### 三级\n\n#### 四级\n\n正文 **粗体** *斜体* ~~删除~~ [链接](https://example.com) 和 \`<行内代码>\`\n\n- 列表\n\n> 引用\n\n| 表头 |\n| --- |\n| 单元格 |\n\n\`\`\`html\n<tag>&value\n\`\`\``);
+    assert.doesNotMatch(html, /style\s*=|<style/i);
+    assert.doesNotMatch(html, /🔹|▶|•/);
+    for (const tag of ['h1', 'h2', 'h3', 'h4', 'p', 'strong', 'em', 'del', 'a', 'ul', 'li', 'blockquote', 'table', 'pre', 'code']) {
+      assert.match(html, new RegExp(`<${tag}(?:\\s|>)`), tag);
     }
-    canvasMode = 'missing';
-    const result = await Publisher.publish({ ...article, coverImagePath: undefined });
+    assert.match(html, /&lt;tag&gt;&amp;value/);
+    assert.match(html, /&lt;行内代码&gt;/);
+
+    let start = requests.length;
+    let result = await Publisher.publish({ ...article, coverImagePath: undefined });
     assert.ok(!result.isError);
-    const upload = requests.findLast(r => r.url.includes('add_material'));
-    assert.match(upload.data.fields[0][2].filename, /\.svg$/);
+    assert.ok(!requests.slice(start).some(r => r.url.includes('add_material')));
+    assert.ok(requests.slice(start).some(r => r.url.includes('uploadnews')));
+    assert.ok(requests.slice(start).some(r => r.url.includes('mass/preview')));
+    assert.equal(Publisher.generateCoverImage, undefined);
     assert.ok(!(await fs.readdir(temp)).some(n => n.startsWith('auto-cover-')));
+
+    start = requests.length;
+    result = await Publisher.publish(article);
+    assert.ok(!result.isError);
+    assert.ok(requests.slice(start).some(r => r.url.includes('add_material')));
   });
   await check('保留可达test_openid模拟预览，拒绝test_消息ID', async () => {
     const before = requests.length;
