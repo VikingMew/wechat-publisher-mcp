@@ -3,7 +3,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { fileURLToPath } from 'url';
 import {
-  listArticles, getArticleStats, createDraft, listSchema, statsSchema, draftSchema
+  listArticles, getArticleStats, createDraft, uploadCover, uploadArticleImage,
+  listSchema, statsSchema, draftSchema, uploadSchema
 } from './tools/wechat-articles.js';
 import logger from './utils/logger.js';
 
@@ -23,6 +24,16 @@ server.registerTool('wechat_create_draft', {
   description: '将 HTML 正文保存到公众号草稿箱，返回草稿 mediaId',
   inputSchema: draftSchema
 }, createDraft);
+
+server.registerTool('wechat_upload_cover', {
+  description: '上传本地封面为永久图片素材，支持 PNG/JPEG/GIF/WebP，返回可用于草稿 thumbMediaId 的 mediaId',
+  inputSchema: uploadSchema
+}, uploadCover);
+
+server.registerTool('wechat_upload_article_image', {
+  description: '上传本地 JPG/PNG 正文图片，返回可插入 HTML img src 的微信 URL',
+  inputSchema: uploadSchema
+}, uploadArticleImage);
 
 logger.info('WeChat Publisher MCP Server initialized');
 

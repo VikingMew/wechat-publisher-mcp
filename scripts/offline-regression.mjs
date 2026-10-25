@@ -16,6 +16,9 @@ const env = { DEBUG: '1', WECHAT_APP_ID: 'wx1234567890abcdef', WECHAT_APP_SECRET
 const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
 let tokenRequests = 0;
 let failure = null;
+let coverResponse = { media_id: 'cover-123', private: 'RAW_RESPONSE_SECRET' };
+let imageResponse = { url: 'http://mmbiz.qpic.cn/offline-image', private: 'RAW_RESPONSE_SECRET' };
+const toolNames = ['wechat_list_articles', 'wechat_get_article_stats', 'wechat_create_draft', 'wechat_upload_cover', 'wechat_upload_article_image'];
 let listResponse = {
   total_count: 3, item_count: 1,
   item: [{ article_id: 'article-123', update_time: 1700000000, private: 'RAW_RESPONSE_SECRET', content: {
@@ -49,7 +52,8 @@ const axios = {
     const endpoint = new URL(url).pathname;
     const failed = maybeFail(endpoint);
     if (failed) return failed;
-    if (endpoint.endsWith('/add_material')) return { data: { media_id: 'cover-123' } };
+    if (endpoint.endsWith('/add_material')) return { data: coverResponse };
+    if (endpoint.endsWith('/uploadimg')) return { data: imageResponse };
     if (endpoint.endsWith('/draft/add')) return { data: { media_id: 'draft-123', private: 'RAW_RESPONSE_SECRET' } };
     if (endpoint.endsWith('/freepublish/batchget')) return { data: listResponse };
     if (endpoint.endsWith('/getarticletotaldetail')) return { data: statsResponse };
@@ -108,7 +112,7 @@ let passed = 0;
 async function check(name, fn) { await fn(); passed++; console.log(`PASS ${name}`); }
 const body = result => JSON.parse(result.content[0].text);
 try {
-  const { listArticles, createDraft, getArticleStats } = await entry('src/tools/wechat-articles.js');
+  const { listArticles, createDraft, getArticleStats, uploadCover, uploadArticleImage } = await entry('src/tools/wechat-articles.js');
   const { getWeChatAPI } = await entry('src/services/WeChatAPI.js');
   const { validateFilePath } = await entry('src/utils/validator.js');
   const covers = path.join(temp, 'covers'); await fs.mkdir(covers);
@@ -145,6 +149,8 @@ try {
     await getWeChatAPI().uploadCoverImage(validated.resolvedPath, validated.imageBuffer);
     assert.deepEqual(requests.at(-1).data.fields[0][1], png);
     assert.match(requests.at(-1).url, /type=image/);
+    await getWeChatAPI().uploadArticleImage(validated.resolvedPath, validated.imageBuffer);
+    assert.deepEqual(requests.at(-1).data.fields[0][1], png);
     await fs.writeFile(cover, png);
   });
   await check('已有封面创建草稿，HTML原样提交且不发布/预览', async () => {
@@ -180,6 +186,73 @@ try {
     assert.equal((await createDraft({ title: 'x', content: '<p>x</p>', coverImagePath: cover })).isError, true);
     assert.ok(!requests.slice(start).some(r => r.url.includes('/draft/add')));
     failure = null;
+  });
+  await check('独立封面上传返回永久素材ID，不创建草稿', async () => {
+    const start = requests.length;
+    assert.deepEqual(body(await uploadCover({ imagePath: cover })), { success: true, mediaId: 'cover-123' });
+    assert.equal(requests.length, start + 1);
+    const request = requests.at(-1);
+    assert.equal(new URL(request.url).pathname, '/cgi-bin/material/add_material');
+    assert.equal(new URL(request.url).searchParams.get('type'), 'image');
+    assert.equal(request.data.fields[0][0], 'media');
+    assert.equal(request.data.fields[0][2].filename, 'cover.png');
+    assert.equal(request.data.fields[0][2].contentType, 'image/png');
+    assert.match(request.config.headers['content-type'], /multipart\/form-data/);
+  });
+  await check('正文PNG/JPEG上传返回原始URL，可组成HTML草稿', async () => {
+    for (const [file, mime] of [[cover, 'image/png'], [path.join(covers, 'image.jpg'), 'image/jpeg']]) {
+      const start = requests.length;
+      const result = body(await uploadArticleImage({ imagePath: file }));
+      assert.deepEqual(result, { success: true, url: imageResponse.url });
+      assert.equal(requests.length, start + 1);
+      const request = requests.at(-1);
+      assert.equal(new URL(request.url).pathname, '/cgi-bin/media/uploadimg');
+      assert.equal(new URL(request.url).searchParams.has('type'), false);
+      assert.equal(request.data.fields[0][0], 'media');
+      assert.equal(request.data.fields[0][2].contentType, mime);
+      assert.deepEqual(request.data.fields[0][1], await fs.readFile(file));
+      const content = `<p><img src="${result.url}"></p>`;
+      const uploadedCover = body(await uploadCover({ imagePath: cover }));
+      assert.equal(body(await createDraft({ title: '标题', content, thumbMediaId: uploadedCover.mediaId })).status, 'draft');
+      assert.equal(requests.at(-1).data.articles[0].content, content);
+    }
+  });
+  await check('两个上传工具先校验参数和文件，非法输入不发网络请求', async () => {
+    const start = requests.length;
+    for (const upload of [uploadCover, uploadArticleImage]) {
+      for (const args of [{}, { imagePath: '' }, { imagePath: 1 }, { imagePath: cover, extra: true }]) {
+        assert.equal(body(await upload(args)).error, 'INVALID_ARGUMENT');
+      }
+      for (const file of [path.join(temp, 'outside.png'), ...['link.png', 'large.png', 'fake.png', 'dir.png', 'missing.png'].map(name => path.join(covers, name))]) {
+        assert.equal((await upload({ imagePath: file })).isError, true);
+      }
+    }
+    const gifLink = path.join(covers, 'gif-link.png');
+    await fs.symlink(path.join(covers, 'image.gif'), gifLink);
+    for (const name of ['image.gif', 'image.webp', 'gif-link.png']) {
+      assert.equal((await uploadArticleImage({ imagePath: path.join(covers, name) })).isError, true);
+    }
+    assert.equal(requests.length, start);
+  });
+  await check('两个上传接口错误脱敏，缺少ID或URL不返回成功', async () => {
+    for (const [upload, endpoint] of [[uploadCover, '/cgi-bin/material/add_material'], [uploadArticleImage, '/cgi-bin/media/uploadimg']]) {
+      for (const network of [true, false]) {
+        failure = { endpoint, network };
+        const result = await upload({ imagePath: cover });
+        assert.equal(result.isError, true);
+        assert.ok(!result.content[0].text.includes('RAW_RESPONSE_SECRET'));
+        assert.ok(!result.content[0].text.includes(env.WECHAT_APP_SECRET));
+        if (!network) assert.match(body(result).message, /48001/);
+      }
+    }
+    failure = null;
+    const savedCover = coverResponse, savedImage = imageResponse;
+    for (const value of [undefined, '', 123]) {
+      coverResponse = { media_id: value }; imageResponse = { url: value };
+      assert.equal((await uploadCover({ imagePath: cover })).isError, true);
+      assert.equal((await uploadArticleImage({ imagePath: cover })).isError, true);
+    }
+    coverResponse = savedCover; imageResponse = savedImage;
   });
   await check('历史文章分页保留多图文分组，默认不返回正文和原始响应', async () => {
     const result = body(await listArticles());
@@ -252,6 +325,7 @@ try {
     const client = getWeChatAPI();
     let before = tokenRequests;
     await createDraft(article); await listArticles(); await getArticleStats({ date: '2025-11-01' });
+    await uploadCover({ imagePath: cover }); await uploadArticleImage({ imagePath: cover });
     assert.equal(tokenRequests, before);
     client.tokenExpireTime = 0;
     const now = Date.now(); await listArticles();
@@ -266,7 +340,7 @@ try {
   await check('凭据仅经环境，缺失或token失败不泄露数据', async () => {
     const start = requests.length;
     delete env.WECHAT_APP_SECRET;
-    for (const result of [await listArticles(), await createDraft(article), await getArticleStats({ date: '2025-11-01' })]) {
+    for (const result of [await listArticles(), await createDraft(article), await getArticleStats({ date: '2025-11-01' }), await uploadCover({ imagePath: cover }), await uploadArticleImage({ imagePath: cover })]) {
       assert.equal(result.isError, true); assert.match(body(result).message, /WECHAT_APP_SECRET/);
     }
     assert.equal(requests.length, start);
@@ -280,9 +354,9 @@ try {
     }
     failure = null;
   });
-  await check('只注册查询与草稿工具，无凭据及发布开关，无Markdown依赖', async () => {
+  await check('只注册查询、草稿及图片上传工具，无凭据及发布开关，无Markdown依赖', async () => {
     await entry('src/server.js');
-    assert.deepEqual([...registered.keys()], ['wechat_list_articles', 'wechat_get_article_stats', 'wechat_create_draft']);
+    assert.deepEqual([...registered.keys()], toolNames);
     for (const tool of registered.values()) {
       for (const field of ['appId', 'appSecret', 'previewMode', 'confirmPublish']) assert.ok(!(field in tool.inputSchema));
     }
@@ -306,12 +380,18 @@ try {
       import { Client } from '@modelcontextprotocol/sdk/client/index.js';
       import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
       const client = new Client({ name: 'offline-regression', version: '1.0.0' });
-      const transport = new StdioClientTransport({ command: process.execPath, args: ['src/server.js'], cwd: process.cwd(), env: { WECHAT_APP_ID: '', WECHAT_APP_SECRET: '' }, stderr: 'pipe' });
+      const transport = new StdioClientTransport({ command: process.execPath, args: ['src/server.js'], cwd: process.cwd(), env: { WECHAT_APP_ID: '', WECHAT_APP_SECRET: '', WECHAT_COVER_DIR: ${JSON.stringify(covers)} }, stderr: 'pipe' });
       let stderr = ''; transport.stderr.on('data', chunk => { stderr += chunk; });
       try {
         await client.connect(transport);
         const { tools } = await client.listTools();
-        assert.deepEqual(tools.map(t => t.name), ['wechat_list_articles', 'wechat_get_article_stats', 'wechat_create_draft']);
+        assert.deepEqual(tools.map(t => t.name), ${JSON.stringify(toolNames)});
+        for (const name of ['wechat_upload_cover', 'wechat_upload_article_image']) {
+          await assert.rejects(client.callTool({ name, arguments: {} }), { code: -32602 });
+          const upload = await client.callTool({ name, arguments: { imagePath: ${JSON.stringify(cover)} } });
+          assert.equal(upload.isError, true);
+          assert.match(upload.content[0].text, /WECHAT_APP_SECRET/);
+        }
         await assert.rejects(client.callTool({ name: 'wechat_list_articles', arguments: { count: 21 } }), { code: -32602 });
         const missing = await client.callTool({ name: 'wechat_list_articles', arguments: {} });
         assert.equal(missing.isError, true);
@@ -320,11 +400,11 @@ try {
         assert.equal(draft.isError, true);
       } finally { await client.close(); }
     `;
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: root, env: { ...process.env, WECHAT_APP_ID: '', WECHAT_APP_SECRET: '' }, encoding: 'utf8', timeout: 15000 });
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', source], { cwd: root, env: { ...process.env, WECHAT_APP_ID: '', WECHAT_APP_SECRET: '', WECHAT_COVER_DIR: covers }, encoding: 'utf8', timeout: 15000 });
     assert.ifError(child.error);
     assert.equal(child.status, 0, child.stderr);
     assert.equal(child.stdout, '');
   });
-  assert.equal(passed, 18);
-  console.log(`TOTAL ${passed}/18 PASS (offline mocks; no network)`);
+  assert.equal(passed, 22);
+  console.log(`TOTAL ${passed}/22 PASS (offline mocks; no network)`);
 } finally { await fs.rm(temp, { recursive: true, force: true }); }

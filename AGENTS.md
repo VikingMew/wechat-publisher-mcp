@@ -3,7 +3,7 @@
 - 本仓是 Node.js ESM 项目；`package.json` 的 `type` 为 `module`，源码导入保持 ESM 语法和 `.js` 扩展名。
 - 使用 Node.js 18+、npm 8+。仓库不提交 `node_modules/`；在运行任何依赖 npm 的脚本前先执行 `npm ci`。
 - `@modelcontextprotocol/sdk` 固定为 `1.15.0`。除非票面明确要求，不要改依赖、版本或 lockfile。
-- 微信凭据仅由服务进程环境变量 `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 注入。自定义封面目录由 `WECHAT_COVER_DIR` 指定，未设置时为当前工作目录下的 `./covers`。
+- 微信凭据仅由服务进程环境变量 `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 注入。封面和正文图片共用允许目录，由 `WECHAT_COVER_DIR` 指定，未设置时为当前工作目录下的 `./covers`。
 
 ## Codebase-Specific Conventions
 
@@ -15,13 +15,13 @@
 
 ### 职责范围
 
-- **In scope：** 本仓当前只提供已发布文章列表、文章累计统计查询、HTML 草稿创建和所需的封面上传，以及 `access_token` 获取与缓存。正文由调用方准备，原样提交，不解析 Markdown、不自动排版、不生成封面。预览、正式发布、草稿更新/删除及正文图片上传均没有工具入口。
+- **In scope：** 本仓当前只提供已发布文章列表、文章累计统计查询、HTML 草稿创建、永久封面素材上传和正文图片上传，以及 `access_token` 获取与缓存。正文由调用方准备，原样提交，不解析 Markdown、不自动排版、不生成封面。预览、正式发布、草稿更新/删除均没有工具入口。
 - **Out of scope：** 排版设计、样式与主题、美化、封面视觉设计和装饰元素创作不属于本仓职责；不得为了这些目的修改本仓代码或新增能力。
 - **越界处理：** 当需求目的属于上述职责外事项（例如“把公众号排版做得更好看”）时，不得静默扩大当前票面；agent 应拒绝并另开票。既有代码的职责收敛也须另行跟踪，不得在无关票面中顺手删除或重构。
 
 ### 数据流
 
-- 调用链为：Muse/agent → MCP stdio 服务 → `api.weixin.qq.com` → 微信公众号。MCP 服务负责工具参数校验、封面校验/上传、微信 API 调用和返回字段映射。正文 HTML 不作转换。
+- 调用链为：Muse/agent → MCP stdio 服务 → `api.weixin.qq.com` → 微信公众号。MCP 服务负责工具参数校验、图片校验/上传、微信 API 调用和返回字段映射。正文 HTML 不作转换。
 - `src/services/WeChatAPI.js` 在进程内缓存 `access_token`，有效期采用接口返回的 `expires_in`，并提前 60 秒视为失效；缓存过期后的下一次调用重新获取。离线回归夹具返回 `expires_in: 7200`。
 - 不得把仓内没有实现或来源的配额写成事实；本仓没有“每日 2000 次”配额实现或依据。
 
@@ -30,6 +30,8 @@
 - `wechat_list_articles`：按 `offset` / `count` 分页读取微信接口可见的已发布记录；`includeContent` 默认 `false`。保留多图文分组，`nextOffset: null` 表示本次结果无下一页。
 - `wechat_get_article_stats`：按发表日 `date`（2025-11-01 起、北京时间今天之前的 YYYY-MM-DD）查询 `getarticletotaldetail`，可用统计接口返回的 `msgId` 筛选；保留发表后最多 30 天的累计人数快照及 `isDelayed`，不把人数标注为次数，缺失指标为 `null`，不累加快照、不将 `articleId` 当作 `msgId`。权限和可查询范围以公众号接口为准。
 - `wechat_create_draft`：`content` 为已准备的 HTML；`thumbMediaId` / `coverImagePath` 必须二选一；返回 `mediaId` 和 `status: "draft"`。不处理正文图片 URL，不保证外部图片被微信保留。
+- `wechat_upload_cover`：接收 `imagePath`，上传永久图片素材并返回 `mediaId`，可用于草稿的 `thumbMediaId`。
+- `wechat_upload_article_image`：接收 `imagePath`，调用 `media/uploadimg` 并返回 `url`；仅接受 JPG/JPEG/PNG。调用方将 URL 放入正文 HTML。两个上传工具都受 `WECHAT_COVER_DIR`、1 MB 和文件校验约束，上传失败不返回成功结果。
 - MCP 返回 `content[0].text` 内的 JSON；操作成功含 `success: true`，操作失败含 `success: false`、`error`、`message` 并设置 `isError: true`。协议层 schema 拒绝由 MCP SDK 返回错误。
 
 ## Code Value Rules
@@ -67,7 +69,7 @@
   node --experimental-vm-modules scripts/offline-regression.mjs
   ```
 
-  期望：命令退出码为 0，末行是 `TOTAL 18/18 PASS (offline mocks; no network)`。`--experimental-vm-modules` 不可省略，否则当前 Node 环境会因 `vm.SourceTextModule` 不可用而失败。
+  期望：命令退出码为 0，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`。`--experimental-vm-modules` 不可省略，否则当前 Node 环境会因 `vm.SourceTextModule` 不可用而失败。
 
 - 离线回归使用 HTTP 替身、临时目录和固定夹具，并使用真实 Zod 与 MCP SDK 验证参数和 stdio 握手。子进程中的微信环境变量为空，不联网，也不调用真实微信 API；测试不得依赖真实 AppID、AppSecret、OpenID 或公众号。
 
@@ -89,7 +91,7 @@
    node --experimental-vm-modules scripts/offline-regression.mjs
    ```
 
-   通过标准：18 项全部通过，末行是 `TOTAL 18/18 PASS (offline mocks; no network)`。
+   通过标准：22 项全部通过，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`。
 
 3. 补丁格式门禁：
 
@@ -120,8 +122,8 @@
 
 1. **stdout 零污染。** MCP stdio 的 stdout 只承载 JSON-RPC 协议；所有日志一律写 stderr。违反会污染协议帧、导致客户端解析失败，因此属于实现错误。
 2. **凭据只经环境变量。** `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 不得进入工具 schema，不得打印、入库、写入文件或进入日志。违反会造成凭据泄露并破坏宿主密钥边界，因此属于实现错误。
-3. **只存草稿，不预览或正式发布。** 写操作止于封面上传及 `draft/add`；不注册预览/发布工具，不调用 `freepublish/submit`、群发或预览接口。不得通过参数或旧入口恢复发布。违反可能造成未授权真实发布，因此属于实现错误。
-4. **封面路径受 `WECHAT_COVER_DIR` 约束。** 默认目录为 `./covers`；不得绕过 realpath/符号链接边界、普通文件、1 MB 上限和 PNG/JPEG/GIF/WebP 图片魔数校验。违反可能读取或上传允许目录外文件，因此属于实现错误。
+3. **只存草稿，不预览或正式发布。** 写操作止于封面/正文图片上传及 `draft/add`；不注册预览/发布工具，不调用 `freepublish/submit`、群发或预览接口。不得通过参数或旧入口恢复发布。违反可能造成未授权真实发布，因此属于实现错误。
+4. **封面和正文图片路径受 `WECHAT_COVER_DIR` 约束。** 默认目录为 `./covers`；不得绕过 realpath/符号链接边界、普通文件、1 MB 上限和 PNG/JPEG/GIF/WebP 图片魔数校验；正文图片仅接受 PNG/JPEG。违反可能读取或上传允许目录外文件，因此属于实现错误。
 
 ## PR Requirements
 

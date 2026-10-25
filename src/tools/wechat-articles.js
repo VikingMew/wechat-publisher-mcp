@@ -5,6 +5,10 @@ import logger from '../utils/logger.js';
 
 const nonEmpty = () => z.string().refine(value => value.trim().length > 0, '不能为空');
 
+export const uploadSchema = {
+  imagePath: nonEmpty().describe('WECHAT_COVER_DIR 内图片路径，最大 1 MB；正文图片仅支持 JPG/PNG')
+};
+
 export const listSchema = {
   offset: z.number().int().min(0).default(0).describe('发布记录偏移量，从 0 开始'),
   count: z.number().int().min(1).max(20).default(20).describe('每页发布记录数，1–20'),
@@ -41,7 +45,9 @@ const schemas = {
     value => (value.thumbMediaId !== undefined) !== (value.coverImagePath !== undefined),
     'thumbMediaId 和 coverImagePath 必须且只能提供一个'
   ),
-  stats: z.object(statsSchema).strict()
+  stats: z.object(statsSchema).strict(),
+  coverUpload: z.object(uploadSchema).strict(),
+  articleImageUpload: z.object(uploadSchema).strict()
 };
 
 async function execute(operation, params, action) {
@@ -75,6 +81,24 @@ export function listArticles(params = {}) {
 
 export function getArticleStats(params) {
   return execute('stats', params, options => getWeChatAPI().getArticleStats(options));
+}
+
+export function uploadCover(params) {
+  return execute('coverUpload', params, async ({ imagePath }) => {
+    const image = await validateFilePath(imagePath);
+    if (!image.valid) throw new Error(image.errors.join('; '));
+    const mediaId = await getWeChatAPI().uploadCoverImage(image.resolvedPath, image.imageBuffer);
+    return { mediaId };
+  });
+}
+
+export function uploadArticleImage(params) {
+  return execute('articleImageUpload', params, async ({ imagePath }) => {
+    const image = await validateFilePath(imagePath, ['.jpg', '.jpeg', '.png']);
+    if (!image.valid) throw new Error(image.errors.join('; '));
+    const url = await getWeChatAPI().uploadArticleImage(image.resolvedPath, image.imageBuffer);
+    return { url };
+  });
 }
 
 export function createDraft(params) {

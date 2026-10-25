@@ -1,14 +1,16 @@
 # 微信公众号 MCP 服务
 
-通过 MCP stdio 读取本公众号已发布文章、查询图文统计，并将准备好的 HTML 保存到草稿箱。
+通过 MCP stdio 读取本公众号已发布文章、查询图文统计、上传封面和正文图片，并将准备好的 HTML 保存到草稿箱。
 
-当前仅提供三个工具：
+当前提供五个工具：
 
 | 工具 | 用途 |
 | --- | --- |
 | `wechat_list_articles` | 分页读取已发布文章信息，可选包含正文 HTML |
 | `wechat_get_article_stats` | 按发表日期读取阅读、分享、收藏等累计统计 |
 | `wechat_create_draft` | 保存单篇 HTML 草稿，返回草稿 ID |
+| `wechat_upload_cover` | 上传永久封面素材，返回素材 ID |
+| `wechat_upload_article_image` | 上传正文图片，返回微信图片 URL |
 
 已删除 Markdown 转换、自动封面生成、发送预览、正式发布及旧发布状态查询入口。服务不处理排版设计；正文 HTML 由调用方准备。
 
@@ -39,7 +41,7 @@ MCP 客户端配置示例，将路径替换为本机绝对路径：
 | --- | --- |
 | `WECHAT_APP_ID` | 必需，公众号 AppID |
 | `WECHAT_APP_SECRET` | 必需，公众号 AppSecret |
-| `WECHAT_COVER_DIR` | 可选，本地封面允许目录；默认服务工作目录下的 `./covers` |
+| `WECHAT_COVER_DIR` | 可选，本地封面和正文图片的允许目录；默认服务工作目录下的 `./covers` |
 | `DEBUG` | 设置为非空值时输出调试日志 |
 | `NODE_ENV` | 设为 `production` 时关闭 INFO 日志 |
 
@@ -88,6 +90,38 @@ MCP 客户端配置示例，将路径替换为本机绝对路径：
 
 统计不是实时数据，每篇文章仅统计发表日起最多 30 天内的数据；具体可见数据、更新时效及权限由微信决定。当前接入指标是人数，不将其标注为阅读或分享次数。`articleId` 与统计 `msgId` 属于不同标识，不能直接互换。本服务不承诺未接入的点赞、评论等指标。字段和统计口径参见[微信官方接口说明](https://developers.weixin.qq.com/doc/service/api/wedata/news/api_getarticletotaldetail.html)。
 
+## 上传封面和正文图片
+
+两个上传工具都接受 `imagePath`，图片必须位于 `WECHAT_COVER_DIR`（默认 `./covers`）内，最大 1 MB。相对路径按服务工作目录解析；校验普通文件、realpath/符号链接边界、扩展名和图片魔数。上传直接使用校验时读取的字节。
+
+调用 `wechat_upload_cover`（支持 PNG/JPEG/GIF/WebP）：
+
+```json
+{ "imagePath": "/absolute/path/to/covers/cover.png" }
+```
+
+成功返回：
+
+```json
+{ "success": true, "mediaId": "permanent-cover-media-id" }
+```
+
+该 `mediaId` 来自永久素材接口 `material/add_material?type=image`，可作为 `wechat_create_draft` 的 `thumbMediaId`。独立上传不会创建草稿。
+
+调用 `wechat_upload_article_image`（仅支持 JPG/JPEG/PNG）：
+
+```json
+{ "imagePath": "/absolute/path/to/covers/article-image.png" }
+```
+
+成功返回：
+
+```json
+{ "success": true, "url": "http://mmbiz.qpic.cn/example" }
+```
+
+将返回的 `url` 原样放入正文 HTML 的 `<img src="…">`，再调用 `wechat_create_draft`。正文图片走 `media/uploadimg`，返回 URL，不返回封面素材 ID；参见[微信官方图片上传说明](https://developers.weixin.qq.com/doc/service/api/material/permanent/api_uploadimage.html)。服务不扫描 HTML 自动上传本地图片。重复上传会再次请求微信，已上传图片不会在后续草稿失败时自动删除。
+
 ## 保存草稿
 
 调用 `wechat_create_draft`，使用已有的永久封面素材 ID：
@@ -124,7 +158,7 @@ MCP 客户端配置示例，将路径替换为本机绝对路径：
 
 结果表示已保存草稿，可以在公众号后台查看和编辑。服务不会发送预览或正式发布。重复调用会新建草稿，不会更新已有草稿。
 
-正文按输入原样提交：不解析 Markdown、不插入样式、不上传或改写正文图片。正文图片应使用微信图文图片上传接口获得的 URL，外部图片可能被微信过滤；本版本没有正文图片上传工具。最终内容以微信处理后的草稿为准。
+正文按输入原样提交：不解析 Markdown、不插入样式、不自动上传或改写正文图片。正文图片应先通过 `wechat_upload_article_image` 上传，再使用返回的 URL；外部图片可能被微信过滤。微信可能将图片 `src` 改为 `data-src` 并将 URL 改为 HTTPS，读回 HTML 不保证与提交内容逐字相同。最终内容以微信处理后的草稿为准。
 
 ## 返回格式与错误
 
@@ -143,10 +177,10 @@ git diff --check
 回归预期最后一行：
 
 ```text
-TOTAL 18/18 PASS (offline mocks; no network)
+TOTAL 22/22 PASS (offline mocks; no network)
 ```
 
-也可以在依赖安装后运行 `npm test`。测试覆盖 HTTP 模拟调用、HTML 原样提交、草稿不发布、分页、多图文、统计快照、token 缓存、封面安全、日志隐私及真实 MCP SDK stdio 握手；不使用真实公众号凭据或访问微信。
+也可以在依赖安装后运行 `npm test`。测试覆盖 HTTP 模拟调用、独立封面/正文图片上传、上传结果组成 HTML 草稿、HTML 原样提交、草稿不发布、分页、多图文、统计快照、token 缓存、图片安全、日志隐私及真实 MCP SDK stdio 握手；不使用真实公众号凭据或访问微信。
 
 离线验证不能替代公众号联调。实际接入后需验证历史列表、一个有统计数据的发表日期，以及一篇测试草稿在后台可见。
 
@@ -161,8 +195,13 @@ TOTAL 18/18 PASS (offline mocks; no network)
 | 文章统计 | 查询 2026-10-25，通过真实 MCP 工具调用成功，返回空列表，`isDelayed: false` |
 | 本地封面上传 | 成功上传为永久图片素材 |
 | 创建草稿 | 成功；随后通过微信草稿详情接口读回，确认标题匹配且正文存在 |
+| 独立封面上传工具 | 通过真实 MCP 调用成功，返回的素材 ID 可创建草稿 |
+| 正文图片上传工具 | 通过真实 MCP 调用成功，返回微信图片 URL |
+| 带正文图片的草稿 | 通过真实 MCP 创建成功；读回确认标题匹配、正文图片指向同一图片资源 |
 
-联调只创建测试草稿及其封面，没有发送预览或正式发布。凭据、token、素材 ID 和微信原始响应不保存在仓库中。
+图片联调中微信将 `src` 改为 `data-src`，将 HTTP 改为 HTTPS，并改写图片 URL 末尾的尺寸段；验证按图片资源路径匹配，不要求整条 URL 字符串相等。
+
+联调创建了测试草稿及封面/正文图片，没有发送预览或正式发布。本次图片接口验证额外留下两篇标题含“可删除”的测试草稿，方便在后台查看；服务没有自动清理远端测试素材。凭据、token、素材 ID 和微信原始响应不保存在仓库中。
 
 联调发现旧统计接口 `getarticletotal` 返回 `47009`（接口已下线），已改用 `getarticletotaldetail`；本项目不回退到旧接口。
 

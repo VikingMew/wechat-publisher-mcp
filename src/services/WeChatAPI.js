@@ -5,7 +5,7 @@ import logger from '../utils/logger.js';
 
 /**
  * 微信公众号API服务
- * 封装微信公众平台的API调用，包括access_token管理、封面上传、历史文章查询、统计及草稿创建
+ * 封装微信公众平台的API调用，包括access_token管理、图片上传、历史文章查询、统计及草稿创建
  */
 class WeChatAPI {
   constructor(appId, appSecret) {
@@ -124,6 +124,14 @@ class WeChatAPI {
   }
 
   async uploadCoverImage(imagePath, validatedBuffer) {
+    return this.uploadImage('cgi-bin/material/add_material', imagePath, validatedBuffer, '封面上传', 'media_id', '&type=image');
+  }
+
+  async uploadArticleImage(imagePath, validatedBuffer) {
+    return this.uploadImage('cgi-bin/media/uploadimg', imagePath, validatedBuffer, '正文图片上传', 'url');
+  }
+
+  async uploadImage(endpoint, imagePath, validatedBuffer, operation, resultField, query = '') {
     const contentTypes = {
       '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
       '.gif': 'image/gif', '.webp': 'image/webp'
@@ -137,23 +145,23 @@ class WeChatAPI {
     let data;
     try {
       const response = await axios.post(
-        `https://api.weixin.qq.com/cgi-bin/material/add_material?access_token=${accessToken}&type=image`,
+        `https://api.weixin.qq.com/${endpoint}?access_token=${accessToken}${query}`,
         formData,
         { headers: formData.getHeaders(), timeout: 30000 }
       );
       data = response.data;
     } catch {
-      throw new Error('封面上传请求失败，未提交草稿');
+      throw new Error(`${operation}请求失败`);
     }
-    if (data.errcode || typeof data.media_id !== 'string' || !data.media_id) {
+    if (data.errcode || typeof data[resultField] !== 'string' || !data[resultField]) {
       const code = Number.isInteger(data.errcode) ? `（错误码 ${data.errcode}）` : '';
-      throw new Error(`封面上传失败${code}，未提交草稿`);
+      throw new Error(`${operation}失败${code}`);
     }
-    return data.media_id;
+    return data[resultField];
   }
 }
 
-// 草稿与查询共用实例；密钥轮换时替换实例，避免复用旧token。
+// 查询、草稿与图片上传共用实例；密钥轮换时替换实例，避免复用旧token。
 const clients = new Map();
 
 export function getWeChatAPI() {
