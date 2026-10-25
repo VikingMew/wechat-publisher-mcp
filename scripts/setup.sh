@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# 微信公众号发布MCP服务 - 快速安装配置脚本
+# 微信公众号查询与草稿MCP服务 - 快速安装配置脚本
 # Quick Setup Script for WeChat Publisher MCP Service
 
 set -e
 
-echo "📱 微信公众号发布MCP服务 - 快速配置向导"
+echo "📱 微信公众号查询与草稿MCP服务 - 快速配置向导"
 echo "============================================="
 echo ""
 
 # 检查Node.js版本
 echo "🔍 检查Node.js环境..."
 if ! command -v node &> /dev/null; then
-    echo "❌ 未找到Node.js，请先安装Node.js 16+版本"
+    echo "❌ 未找到Node.js，请先安装Node.js 18+版本"
     echo "   下载地址: https://nodejs.org/"
     exit 1
 fi
 
 NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 16 ]; then
-    echo "❌ Node.js版本过低($NODE_VERSION)，需要16+版本"
+if [ "$NODE_VERSION" -lt 18 ]; then
+    echo "❌ Node.js版本过低($NODE_VERSION)，需要18+版本"
     exit 1
 fi
 
@@ -36,7 +36,7 @@ echo ""
 
 # 安装依赖
 echo "📦 安装项目依赖..."
-npm install
+npm ci
 
 if [ $? -ne 0 ]; then
     echo "❌ 依赖安装失败"
@@ -110,13 +110,13 @@ echo "3. 将MCP服务添加到您的AI工具配置中"
 echo "4. 重启AI工具以加载MCP服务"
 echo ""
 echo "使用方法："
-echo "- 在AI工具中说: '帮我发布一篇文章到微信公众号'"
+echo "- 在AI工具中说: '读取公众号历史文章，或将 HTML 保存为草稿'"
 echo "- 提供标题、内容、作者等信息"
-echo "- AI会自动调用发布服务"
+echo "- AI会调用文章查询、统计查询或草稿工具"
 echo ""
 echo "更多帮助："
 echo "- 查看 README.md 了解详细用法"
-echo "- 运行 'npm run example' 查看代码示例"
+echo "- 查看 examples/basic-usage.js 中的显式调用示例"
 echo "- 查看 examples/ 目录中的示例文件"
 echo ""
 echo "📧 如有问题，请提交Issue或联系技术支持"

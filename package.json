@@ -10,8 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --inspect src/server.js",
-    "test": "jest",
-    "test:watch": "jest --watch",
+    "test": "node --experimental-vm-modules scripts/offline-regression.mjs",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "build": "npm run lint && npm test"

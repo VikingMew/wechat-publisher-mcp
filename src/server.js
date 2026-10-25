@@ -2,97 +2,27 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { fileURLToPath } from 'url';
-import { z } from 'zod';
-import WeChatPublisher from './tools/wechat-publisher.js';
-import WeChatStatus from './tools/wechat-status.js';
-
+import {
+  listArticles, getArticleStats, createDraft, listSchema, statsSchema, draftSchema
+} from './tools/wechat-articles.js';
 import logger from './utils/logger.js';
 
-// 创建MCP服务器
-const server = new McpServer({
-  name: "wechat-publisher-mcp",
-  version: "1.0.0"
-});
+const server = new McpServer({ name: 'wechat-publisher-mcp', version: '1.0.0' });
 
-// 注册微信发布工具
-server.registerTool(
-  "wechat_publish_article",
-  {
-    description: "将文章发布到微信公众号，支持Markdown格式",
-    inputSchema: {
-      title: z.string().describe("文章标题"),
-      content: z.string().describe("Markdown格式的文章内容"),
-      author: z.string().describe("作者名称"),
-      coverImagePath: z.string().optional().describe("封面图片路径"),
-      previewMode: z.boolean().default(true).describe("是否为预览模式"),
-      confirmPublish: z.boolean().default(false).describe("真实发布必须显式为true，并设置previewMode为false"),
-      previewOpenId: z.string().optional().describe("预览用户OpenID")
-    }
-  },
-  async (params) => {
-    const { title, content, author, coverImagePath, previewMode, confirmPublish, previewOpenId } = params;
-    logger.info('收到文章发布请求');
-    
-    try {
-      // 调用实际的发布逻辑
-      const result = await WeChatPublisher.publish({
-        title,
-        content,
-        author,
-        coverImagePath,
-        previewMode,
-        confirmPublish,
-        previewOpenId
-      });
-      
-      return result;
-    } catch (error) {
-      logger.error(`发布失败: ${error.message}`);
-      return {
-        content: [{
-          type: "text",
-          text: `❌ 发布失败: ${error.message}`
-        }],
-        isError: true
-      };
-    }
-  }
-);
+server.registerTool('wechat_list_articles', {
+  description: '分页读取本公众号已成功发布的文章列表，可选返回正文 HTML',
+  inputSchema: listSchema
+}, listArticles);
 
-// 注册状态查询工具
-server.registerTool(
-  "wechat_query_status",
-  {
-    description: "查询文章发布状态和统计数据",
-    inputSchema: {
-      msgId: z.string().describe("消息ID"),
-    }
-  },
-  async (params) => {
-    const { msgId } = params;
-    logger.info(`Querying status for message: ${msgId}`);
-    
-    try {
-      // 调用实际的查询逻辑
-      const result = await WeChatStatus.query({
-        msgId
-      });
-      
-      return result;
-    } catch (error) {
-      logger.error(`查询失败: ${error.message}`);
-      return {
-        content: [{
-          type: "text",
-          text: `❌ 查询失败: ${error.message}`
-        }],
-        isError: true
-      };
-    }
-  }
-);
+server.registerTool('wechat_get_article_stats', {
+  description: '按发表日期读取文章累计阅读、分享、收藏人数；不是实时数据，msgId 与 articleId 不通用',
+  inputSchema: statsSchema
+}, getArticleStats);
 
-
+server.registerTool('wechat_create_draft', {
+  description: '将 HTML 正文保存到公众号草稿箱，返回草稿 mediaId',
+  inputSchema: draftSchema
+}, createDraft);
 
 logger.info('WeChat Publisher MCP Server initialized');
 

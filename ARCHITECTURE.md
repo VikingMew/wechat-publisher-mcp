@@ -1,318 +1,61 @@
 # WeChat Publisher MCP Architecture
 
-## 系统架构概览
+本服务通过 MCP stdio 提供公众号历史文章、统计查询和 HTML 草稿创建。
 
-WeChat Publisher MCP是一个基于Model Context Protocol (MCP)标准的微信公众号自动发布服务，采用分层架构设计，提供高度可扩展和易于集成的微信内容发布能力。
+## 模块与数据流
 
-## 架构图
-
-```
-┌─────────────────────────────────────────────┐
-│                AI Client                    │
-│        (Claude Desktop / Cursor)           │
-└─────────────┬───────────────────────────────┘
-              │ MCP Protocol
-              │ (JSON-RPC over stdio)
-┌─────────────▼───────────────────────────────┐
-│            MCP Server Layer                 │
-│         (server.js - 协议处理)               │
-└─────────────┬───────────────────────────────┘
-              │
-┌─────────────▼───────────────────────────────┐
-│            Tools Layer                      │
-│  ┌─────────────────┐  ┌─────────────────┐   │
-│  │ wechat-publisher│  │ wechat-status   │   │
-│  │   (发布工具)     │  │   (状态查询)     │   │
-│  └─────────────────┘  └─────────────────┘   │
-└─────────────┬───────────────┬───────────────┘
-              │               │
-┌─────────────▼───────────────▼───────────────┐
-│            Services Layer                   │
-│  ┌─────────────────┐  ┌─────────────────┐   │
-│  │   WeChatAPI     │  │MarkdownConverter│   │
-│  │  (微信API封装)   │  │  (格式转换器)    │   │
-│  └─────────────────┘  └─────────────────┘   │
-└─────────────┬───────────────┬───────────────┘
-              │               │
-┌─────────────▼───────────────▼───────────────┐
-│            Utils Layer                      │
-│  ┌─────────┐ ┌─────────┐ ┌─────────────┐    │
-│  │Validator│ │ Logger  │ │   Others    │    │
-│  └─────────┘ └─────────┘ └─────────────┘    │
-└─────────────────────────────────────────────┘
+```text
+MCP client
+  → src/server.js（工具注册、stdio）
+  → src/tools/wechat-articles.js（Zod 参数校验、草稿封面处理、MCP 返回封装）
+  → src/services/WeChatAPI.js（token、HTTP 调用、字段映射）
+  → api.weixin.qq.com
 ```
 
-## 核心组件详细设计
+`src/utils/validator.js` 负责本地封面文件边界检查；`src/utils/logger.js` 只写 stderr。`src/index.js` 提供程序入口，包的 bin 和 `npm start` 使用 `src/server.js`。
 
-### 1. MCP Server Layer (服务器层)
+## 微信接口对应关系
 
-**文件**: `src/server.js`
+| 工具 | 微信接口 | 行为 |
+| --- | --- | --- |
+| `wechat_list_articles` | `POST /cgi-bin/freepublish/batchget` | offset/count 分页，保留多图文分组；默认 `no_content: 1` |
+| `wechat_get_article_stats` | `POST /datacube/getarticletotaldetail` | begin_date/end_date 均为输入发表日；可按统计 msgId 筛选 |
+| `wechat_create_draft` | `POST /cgi-bin/draft/add` | 单篇 HTML 草稿，返回 mediaId |
+| 草稿本地封面 | `POST /cgi-bin/material/add_material?type=image` | 上传校验后的图片为永久素材，供 thumb_media_id 使用 |
+| 共用 token | `GET /cgi-bin/token` | 从服务环境读取凭据，进程内缓存 |
 
-**职责**:
-- 实现MCP协议通信
-- 工具注册和路由
-- 请求参数验证
-- 错误处理和响应格式化
+文章列表的 `articleId` 与统计接口的 `msgId` 不做自动关联。列表返回的更新时间不等同于发表日期。统计使用 `getarticletotaldetail` 的 `detail_list`，将 `read_user`、`share_user`、`collection_user` 映射为阅读、分享、收藏人数，并保留 `statDate` 累计快照和 `is_delay` 延迟标记。允许日期自 2025-11-01 起至北京时间昨日；每篇文章的统计窗口最长为发表后 30 天。缺失指标映射为 `null`，不伪造零值或次数。
 
-**关键特性**:
-- 完全符合MCP 1.0协议规范
-- 支持工具发现和调用
-- 统一的错误处理机制
-- 详细的调试日志记录
+旧 `getarticletotal` 在真实接口测试中返回 47009（接口已下线），不保留该接口的兼容或回退路径。字段口径见[微信官方说明](https://developers.weixin.qq.com/doc/service/api/wedata/news/api_getarticletotaldetail.html)。
 
-### 2. Tools Layer (工具层)
+## 草稿行为
 
-#### 2.1 wechat-publisher.js (发布工具)
+工具先验证参数及本地封面，再获取 API 客户端。提供已有 `thumbMediaId` 时直接创建草稿；提供本地图片时校验并上传图片，再调用 `draft/add`。两种封面来源互斥。
 
-**功能**:
-- 文章发布到微信公众号
-- 支持预览模式和正式发布
-- 封面图片自动上传
-- Markdown内容格式转换
+正文 HTML 原样提交。作者、摘要、阅读原文链接仅在调用方提供时发送。不进行 Markdown 转换、样式生成、自动封面生成、正文图片上传或 URL 改写。预览、正式发布、发布状态查询及模拟成功分支已删除；没有旧入口兼容层。
 
-**输入参数**:
-- `user_request`: 自然语言发布请求
-- `title`: 文章标题
-- `content`: Markdown格式内容
-- `author`: 作者信息
-- `cover_image_path`: 封面图片路径
-- `is_preview`: 是否为预览模式
+微信 API 写入操作止于上传封面和创建草稿。草稿结果不生成文章 URL，不声称已发布。若图片上传成功但草稿创建失败，上传的永久素材可能仍保留在公众号中；服务不自动删除素材，也不自动重试写入。
 
-**输出**:
-- 发布成功: 文章URL、发布ID
-- 预览模式: 预览链接
-- 错误处理: 详细错误信息和解决建议
+## 安全与契约
 
-#### 2.2 wechat-status.js (状态查询工具)
+- stdout 只承载 JSON-RPC，日志仅记录操作类型、结果和必要诊断信息。
+- `WECHAT_APP_ID` / `WECHAT_APP_SECRET` 仅通过进程环境注入，不进入工具 schema。
+- 客户端按 AppID 缓存在进程内；AppSecret 改变时替换实例。token 按 `expires_in` 缓存，提前 60 秒失效；失效后的下一次调用重新获取。
+- 本地封面限制于 `WECHAT_COVER_DIR`（默认当前工作目录下 `covers`），保留普通文件、1 MB、图片魔数及路径边界校验。上传使用已校验字节，不再次按路径读取。
+- 查询返回选定业务字段，错误不包含微信原始响应、HTTP 请求 URL 或凭据。
+- 业务结果封装为 MCP 文本中的 JSON；schema 拒绝由 MCP SDK 处理，其余失败返回 `isError: true`。
 
-**功能**:
-- 查询文章发布状态
-- 获取阅读数据统计
-- 监控发布进度
+公众号权限、IP 白名单和密钥轮换由宿主/公众号管理侧负责。服务没有持久化数据库、队列、自动重试或历史爬取能力。
 
-**输入参数**:
-- `article_id`: 文章ID或发布ID
-- `query_type`: 查询类型(status/stats)
+## 文档对齐
 
-**输出**:
-- 发布状态信息
-- 统计数据(阅读量、点赞数等)
-- 历史发布记录
+本次行为契约同时体现在 `README.md`（使用方式）、`AGENTS.md`（agent 边界）和离线回归。仓库维持现有 No owner 登记计划：当前无 `docs/*-design.md` 或 L3 owner，本文件提供架构背景；正式设计 owner 的建立仍需独立设计票，不在本次功能收敛中引入文档层级。
 
-### 3. Services Layer (服务层)
+| 行为 | 实现 | 验证 |
+| --- | --- | --- |
+| 仅查询与存草稿 | server.js / wechat-articles.js / WeChatAPI.js | 工具清单、无发布请求、真实 stdio 握手 |
+| HTML 不转换 | createDraft | 对比提交正文的完整字符串 |
+| 分页和累计统计 | listArticles / getArticleStats | 多图文、末页、空结果、缺失指标、累计快照 |
+| 凭据、token、封面、日志边界 | WeChatAPI.js / validator.js / logger.js | 环境缺失、轮换/过期、路径/魔数、日志隐私 |
 
-#### 3.1 WeChatAPI.js (微信API服务)
-
-**核心功能**:
-```javascript
-class WeChatAPI {
-  // Access Token管理
-  async getAccessToken()
-  
-  // 素材上传
-  async uploadMedia(imagePath, type = 'image')
-  
-  // 文章发布
-  async publishArticle(articleData)
-  
-  // 预览发送
-  async sendPreview(articleData, openid)
-  
-  // 状态查询
-  async getArticleStatus(publishId)
-}
-```
-
-**技术特点**:
-- Token自动刷新和缓存
-- 错误重试机制
-- 接口限频保护
-- 完整的错误码映射
-
-#### 3.2 MarkdownConverter.js (格式转换服务)
-
-**转换能力**:
-- Markdown → 微信富文本HTML
-- 移动端样式优化
-- 代码块语法高亮
-- 表格响应式处理
-- 图片自适应缩放
-
-**样式特点**:
-- 符合微信公众号显示规范
-- 现代化的视觉设计
-- 良好的移动端体验
-- 代码块专业显示效果
-
-### 4. Utils Layer (工具层)
-
-#### 4.1 Validator.js (参数验证)
-
-- 输入参数格式验证
-- 业务规则检查
-- 自然语言解析
-- 安全性验证
-
-#### 4.2 Logger.js (日志系统)
-
-- 多级别日志记录
-- 敏感信息脱敏
-- 性能监控
-- 错误追踪
-
-## 数据流设计
-
-### 发布流程数据流
-
-```
-1. AI Client发送发布请求
-   ↓
-2. MCP Server接收并验证请求
-   ↓
-3. wechat-publisher工具处理请求
-   ↓
-4. Validator验证参数
-   ↓
-5. MarkdownConverter转换内容格式
-   ↓
-6. WeChatAPI上传封面图片
-   ↓
-7. WeChatAPI创建草稿
-   ↓
-8. WeChatAPI发布文章
-   ↓
-9. 返回发布结果给AI Client
-```
-
-### 状态查询数据流
-
-```
-1. AI Client发送状态查询请求
-   ↓
-2. MCP Server路由到wechat-status工具
-   ↓
-3. WeChatAPI查询微信接口
-   ↓
-4. 格式化状态信息
-   ↓
-5. 返回查询结果
-```
-
-## 安全性设计
-
-### 1. 配置安全
-- AppID/AppSecret存储在本地配置文件
-- 敏感信息不在日志中显示
-- 支持环境变量配置
-
-### 2. 接口安全
-- 请求参数严格验证
-- 防止SQL注入和XSS攻击
-- 接口访问频率限制
-
-### 3. 数据安全
-- 文章内容本地处理
-- 不存储用户敏感信息
-- 临时文件自动清理
-
-## 性能优化
-
-### 1. 缓存策略
-- Access Token内存缓存
-- 图片上传结果缓存
-- 接口响应缓存
-
-### 2. 并发处理
-- 异步操作优化
-- 请求队列管理
-- 错误重试机制
-
-### 3. 资源管理
-- 内存使用优化
-- 文件句柄管理
-- 网络连接复用
-
-## 扩展性设计
-
-### 1. 插件化架构
-- 工具热插拔支持
-- 自定义转换器
-- 第三方服务集成
-
-### 2. 多平台支持
-- 抽象平台接口
-- 统一的内容格式
-- 可配置的发布流程
-
-### 3. API版本管理
-- 向下兼容保证
-- 版本特性检测
-- 平滑升级机制
-
-## 监控和诊断
-
-### 1. 健康检查
-- 服务状态监控
-- 微信API连通性检查
-- 依赖服务状态
-
-### 2. 性能指标
-- 请求响应时间
-- 成功率统计
-- 错误分布分析
-
-### 3. 日志分析
-- 结构化日志格式
-- 关键操作追踪
-- 异常情况告警
-
-## 部署架构
-
-### 1. 单机部署
-```
-AI工具 ←→ MCP服务 ←→ 微信API
-```
-
-### 2. 分布式部署
-```
-多个AI工具 ←→ 负载均衡 ←→ 多个MCP服务实例 ←→ 微信API
-```
-
-### 3. 容器化部署
-- Docker镜像打包
-- Kubernetes orchestration
-- 自动扩缩容支持
-
-## 开发和测试
-
-### 1. 开发环境
-- 本地MCP服务器
-- 微信测试号配置
-- 模拟数据生成
-
-### 2. 测试策略
-- 单元测试覆盖
-- 集成测试验证
-- 端到端测试
-
-### 3. CI/CD流程
-- 自动化构建
-- 测试自动运行
-- 版本自动发布
-
-## 未来发展方向
-
-### 1. 功能增强
-- 多媒体内容支持
-- 定时发布功能
-- 批量操作能力
-
-### 2. 平台扩展
-- 支持更多内容平台
-- 统一内容管理
-- 跨平台同步发布
-
-### 3. 智能化提升
-- AI内容优化建议
-- 自动SEO优化
-- 用户行为分析 
+`scripts/offline-regression.mjs` 共 18 项，HTTP 使用替身，Zod 和 MCP SDK 使用实际锁定依赖；stdio 子进程只调用无凭据及无效参数路径，不访问真实微信。
