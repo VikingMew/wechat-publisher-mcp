@@ -16,7 +16,7 @@ MCP client
 
 ## Python Skill
 
-`skills/wechat-official-account/SKILL.md` 提供 agent 操作指导；`scripts/wechat.py` 是随 Skill 分发的独立 Python CLI，不依赖仓库其他文件、Node、MCP 或第三方包。运行环境是 Python 3.10+、Linux/macOS。
+`skills/wechat-official-account/SKILL.md` 提供 agent 操作指导；`scripts/wechat.py` 是随 Skill 分发的独立 Python CLI，不依赖仓库其他文件、Node、MCP 或第三方包。运行环境是 Python 3.10+、Windows、Linux 或 macOS。
 
 ```text
 agent / CLI user
@@ -27,6 +27,8 @@ agent / CLI user
 五个 Python 命令与下表五项业务操作对应，使用同样的微信接口和业务字段。输入从 stdin 或 `--input` 文件读取，输出直接为 JSON；退出码 0 / 1 表示业务成功 / 失败，命令用法错误为 2。`contentSourceUrl` 只接受 HTTP(S)，输入和图片校验失败统一为 `INVALID_ARGUMENT`。
 
 Python 使用 `urllib.request` 发送 JSON 和 multipart 请求，图片上传直接使用已验证的内存字节。token 只在单次进程的 API 实例内缓存，提前 60 秒失效；每次 CLI 调用重新获取，不使用磁盘缓存，也不与 MCP 共享状态。两种交付均只从环境读取凭据，不自动重试写入。
+
+图片打开按平台选用 `O_BINARY`、`O_NOFOLLOW`、`O_NONBLOCK`；打开前检查普通文件，打开后比较 `lstat` / `fstat` 文件标识并重新解析路径，确认后才读取内容。这样 Windows 缺少 Unix 标志时仍保留文件边界检查。CLI 固定 UTF-8 标准流，参数文件接受 UTF-8 BOM。Windows 分支在 Linux 上模拟验证，尚无原生 Windows 实测记录。
 
 ## 微信接口对应关系
 
@@ -77,4 +79,4 @@ Python 使用 `urllib.request` 发送 JSON 和 multipart 请求，图片上传�
 
 `scripts/offline-regression.mjs` 共 22 项，HTTP 使用替身，Zod 和 MCP SDK 使用实际锁定依赖；stdio 子进程只调用无凭据及无效参数路径，不访问真实微信。
 
-`scripts/python-skill-regression.py` 共 14 项，只使用标准库、HTTP 替身、固定假凭据和临时目录，验证 Python 五项操作及其文件、凭据、错误和命令行边界，不访问真实微信。
+`scripts/python-skill-regression.py` 共 18 项，只使用标准库、HTTP 替身、固定假凭据和临时目录，验证 Python 五项操作及其文件、凭据、错误和命令行边界，不访问真实微信。

@@ -5,13 +5,13 @@ description: 使用 Python 直接调用微信公众号 API，读取已发布文�
 
 # 微信公众号操作
 
-使用本 Skill 自带的 `scripts/wechat.py`，从本文件所在目录解析脚本的绝对路径。需要 Python 3.10+ 和 Linux/macOS，只使用标准库，无需 pip、npm 或 MCP 服务。
+使用本 Skill 自带的 `scripts/wechat.py`，从本文件所在目录解析脚本的绝对路径。需要 Python 3.10+ 和 Windows、Linux 或 macOS，只使用标准库，无需 pip、npm 或 MCP 服务。
 
 ## 环境与执行
 
 - 宿主进程环境须提供 `WECHAT_APP_ID`、`WECHAT_APP_SECRET`。只检查是否存在，不显示其值；缺失时请用户通过宿主环境配置，不让用户把密钥写进命令参数、JSON、文件或对话。
 - `WECHAT_COVER_DIR` 是封面及正文图片的允许目录，默认当前工作目录的 `./covers`。相对图片路径相对于当前工作目录，不相对于 Skill 或该变量。
-- 所有业务命令从 stdin 接收 JSON 对象，也可用 `--input /absolute/path/params.json` 读取 UTF-8 参数文件。输入不包含凭据。
+- 所有业务命令从 stdin 接收 UTF-8 JSON 对象，也可用 `--input` 读取 UTF-8 参数文件（接受 BOM）。stdout/stderr 使用 UTF-8。输入不包含凭据。
 - stdout 输出一个 JSON 结果，成功含 `success: true`，失败含 `success: false`、`error`、`message`；退出码分别为 0 / 1。命令用法错误退出码为 2，诊断写 stderr。
 - token 只缓存在单个 Python 进程内，按 `expires_in` 提前 60 秒失效，不落盘。每次启动 CLI 会重新获取 token。
 
@@ -22,6 +22,15 @@ python3 /path/to/skill/scripts/wechat.py list-articles <<'JSON'
 {"offset":0,"count":20,"includeContent":false}
 JSON
 ```
+
+Windows PowerShell 使用 `--input`，避免旧版 PowerShell 管道改变中文编码。图片路径可写为 `C:/wechat/covers/cover.png`；反斜杠路径在 JSON 中必须写成 `C:\\wechat\\covers\\cover.png`。
+
+```powershell
+'{"imagePath":"C:/wechat/covers/cover.png"}' | Set-Content -Encoding UTF8 .\image-params.json
+py -3 C:/path/to/skill/scripts/wechat.py upload-cover --input .\image-params.json
+```
+
+宿主需把 `WECHAT_COVER_DIR` 配置为对应图片目录。上面的 Bash heredoc 示例适用于 Linux/macOS；在 PowerShell 中将相同 JSON 写入 UTF-8 文件后使用 `--input`。
 
 ## 操作与结果
 

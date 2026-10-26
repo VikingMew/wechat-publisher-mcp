@@ -1,7 +1,7 @@
 ## Environment
 
 - 本仓提供 Node.js MCP 与用户明确要求的独立 Python Skill 两种交付。Node 部分是 ESM；`package.json` 的 `type` 为 `module`，源码导入保持 ESM 语法和 `.js` 扩展名。
-- `skills/wechat-official-account/` 是可独立复制的 Skill，运行时使用 Python 3.10+ 标准库、Linux/macOS，不依赖 Node、MCP 或第三方 Python 包。
+- `skills/wechat-official-account/` 是可独立复制的 Skill，运行时使用 Python 3.10+ 标准库、Windows、Linux 或 macOS，不依赖 Node、MCP 或第三方 Python 包。
 - 使用 Node.js 18+、npm 8+。仓库不提交 `node_modules/`；在运行任何依赖 npm 的脚本前先执行 `npm ci`。
 - `@modelcontextprotocol/sdk` 固定为 `1.15.0`。除非票面明确要求，不要改依赖、版本或 lockfile。
 - 微信凭据仅由服务进程环境变量 `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 注入。封面和正文图片共用允许目录，由 `WECHAT_COVER_DIR` 指定，未设置时为当前工作目录下的 `./covers`。
@@ -59,7 +59,8 @@
 
 ## Tests and Validation
 
-- Python Skill 回归：`python3 -B scripts/python-skill-regression.py`，预期 14 项通过（`Ran 14 tests` / `OK`）；不需要 npm，不使用真实凭据、不联网。覆盖独立拷贝在 `python3 -S` 下执行、API 字段映射、图片边界、上传/草稿及错误脱敏。
+- Python Skill 回归：`python3 -B scripts/python-skill-regression.py`，预期 18 项通过（`Ran 18 tests` / `OK`）；不需要 npm，不使用真实凭据、不联网。覆盖独立拷贝在 `python3 -S` 下执行、API 字段映射、图片边界、上传/草稿及错误脱敏。
+- Windows 兼容测试在 Linux 上模拟缺失 Unix 标志、二进制模式、文件替换和旧编码流；不能把模拟通过表述为原生 Windows 验收。Windows 运行完整回归需创建符号链接权限或开发者模式，不跳过该测试。Python CLI 标准流为 UTF-8，参数文件支持 UTF-8 BOM。
 
 - 首次验证或依赖清理后安装锁定依赖：
 
@@ -98,7 +99,7 @@
    python3 -B scripts/python-skill-regression.py
    ```
 
-   通过标准：Node 22 项全部通过，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`；Python 14 项通过，输出 `OK`。
+   通过标准：Node 22 项全部通过，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`；Python 18 项通过，输出 `OK`。
 
 3. 补丁格式门禁：
 

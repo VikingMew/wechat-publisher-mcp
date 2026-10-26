@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -185,19 +186,88 @@ class SkillTests(unittest.TestCase):
     def test_image_boundaries_before_network(self):
         outside = self.root / "outside.png"
         outside.write_bytes(PNG)
-        (self.covers / "outside-link.png").symlink_to(outside)
         (self.covers / "fake.png").write_text("not image")
         (self.covers / "large.png").write_bytes(PNG + b"0" * wechat.MAX_IMAGE_SIZE)
         (self.covers / "dir.png").mkdir()
-        (self.covers / "image.gif").write_bytes(b"GIF89a")
-        (self.covers / "gif-link.png").symlink_to(self.covers / "image.gif")
         paths = [outside, self.covers / "../outside.png"] + [self.covers / name for name in
-                 ("outside-link.png", "fake.png", "large.png", "dir.png", "missing.png")]
+                 ("fake.png", "large.png", "dir.png", "missing.png")]
         for command in ("upload-cover", "upload-article-image"):
             for file in paths:
                 self.assertEqual(self.call(command, {"imagePath": str(file)})["error"], "INVALID_ARGUMENT")
+        self.assertEqual(self.requests, [])
+
+    def test_symbolic_link_boundaries(self):
+        outside = self.root / "outside.png"
+        outside.write_bytes(PNG)
+        (self.covers / "image.gif").write_bytes(b"GIF89a")
+        (self.covers / "outside-link.png").symlink_to(outside)
+        (self.covers / "gif-link.png").symlink_to(self.covers / "image.gif")
+        for command in ("upload-cover", "upload-article-image"):
+            self.assertFalse(self.call(command, {"imagePath": str(self.covers / "outside-link.png")})["success"])
         self.assertFalse(self.call("upload-article-image", {"imagePath": str(self.covers / "gif-link.png")})["success"])
         self.assertEqual(self.requests, [])
+
+    def windows_open_environment(self, before_open=None):
+        # Exercise missing flags without changing os globally or pretending this
+        # Linux test is a native Windows filesystem test.
+        simulated = SimpleNamespace(**vars(os))
+        for flag in ("O_NOFOLLOW", "O_NONBLOCK"):
+            simulated.__dict__.pop(flag, None)
+        binary_flag = 1 << 29
+        simulated.O_BINARY = binary_flag
+
+        def open_binary(file, flags):
+            self.assertTrue(flags & binary_flag, "Windows images must be opened in binary mode")
+            if before_open:
+                before_open(file)
+            return os.open(file, flags & ~binary_flag | getattr(os, "O_BINARY", 0))
+
+        simulated.open = open_binary
+        return patch.object(wechat, "os", simulated)
+
+    def test_upload_and_draft_without_unix_flags(self):
+        data = PNG + b"\r\n\x1a\xff\x00"
+        self.cover.write_bytes(data)
+        with self.windows_open_environment():
+            for command in ("upload-cover", "upload-article-image"):
+                self.assertTrue(self.call(command, {"imagePath": str(self.cover)})["success"])
+                self.assertIn(b"\r\n\r\n" + data + b"\r\n--", self.requests[-1].data)
+            self.assertTrue(self.call("create-draft", {
+                "title": "标题", "content": "<p>正文</p>", "coverImagePath": str(self.cover)})["success"])
+            self.assertEqual(self.sent_payload()["articles"][0]["thumb_media_id"], "cover-123")
+            self.cover.write_text("fake image")
+            before = len(self.requests)
+            self.assertFalse(self.call("upload-cover", {"imagePath": str(self.cover)})["success"])
+            self.assertEqual(len(self.requests), before)
+
+    def test_file_replaced_before_open_without_nofollow(self):
+        replacement = self.covers / "replacement.png"
+        replacement.write_bytes(PNG + b"replacement")
+
+        def replace(file):
+            replacement.replace(file)
+
+        with self.windows_open_environment(replace):
+            result = self.call("upload-cover", {"imagePath": str(self.cover)})
+        self.assertEqual(result["error"], "INVALID_ARGUMENT")
+        self.assertIn("发生变化", result["message"])
+        self.assertEqual(self.requests, [])
+
+    def test_cli_utf8_streams_and_bom_file(self):
+        # Force a legacy stream encoding as on Windows redirected stdin/stdout.
+        env = {**os.environ, "WECHAT_APP_ID": "", "WECHAT_APP_SECRET": "", "PYTHONIOENCODING": "ascii"}
+        params = {"imagePath": str(self.covers / "中文图片.png")}
+        payload = json.dumps(params, ensure_ascii=False).encode("utf-8-sig")
+        params_file = self.root / "params.json"
+        params_file.write_bytes(payload)
+        for args, stdin in [([], payload), (["--input", str(params_file)], b"")]:
+            child = subprocess.run([sys.executable, "-B", str(SCRIPT), "upload-cover", *args],
+                                   input=stdin, env=env, capture_output=True, timeout=10)
+            self.assertEqual(child.returncode, 1)
+            result = json.loads(child.stdout.decode("utf-8"))
+            self.assertEqual(result["error"], "INVALID_ARGUMENT")
+            self.assertIn("图片读取失败", result["message"])
+            self.assertEqual(child.stderr, b"")
 
     def test_default_directory(self):
         old_cwd = os.getcwd()
@@ -264,11 +334,11 @@ class SkillTests(unittest.TestCase):
         shutil.copyfile(SCRIPT, standalone)
         env = {**os.environ, "WECHAT_APP_ID": "", "WECHAT_APP_SECRET": ""}
         child = subprocess.run([sys.executable, "-S", str(standalone), "--help"], cwd=self.root,
-                               env=env, capture_output=True, text=True, timeout=10)
+                               env=env, capture_output=True, text=True, encoding="utf-8", timeout=10)
         self.assertEqual(child.returncode, 0)
         self.assertIn("upload-article-image", child.stdout)
         child = subprocess.run([sys.executable, "-S", str(standalone), "list-articles"], input="{}",
-                               cwd=self.root, env=env, capture_output=True, text=True, timeout=10)
+                               cwd=self.root, env=env, capture_output=True, text=True, encoding="utf-8", timeout=10)
         self.assertEqual(child.returncode, 1)
         self.assertIn("WECHAT_APP_SECRET", json.loads(child.stdout)["message"])
         self.assertEqual(child.stderr, "")

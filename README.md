@@ -16,7 +16,7 @@
 
 ## Python Skill：直接使用
 
-Skill 位于 [`skills/wechat-official-account/`](skills/wechat-official-account/SKILL.md)。需要 **Python 3.10+、Linux/macOS**，只使用标准库，无需 Node.js、npm、pip 或 MCP。整个目录可单独复制到支持 Skill 的 agent 中使用。
+Skill 位于 [`skills/wechat-official-account/`](skills/wechat-official-account/SKILL.md)。需要 **Python 3.10+、Windows、Linux 或 macOS**，只使用标准库，无需 Node.js、npm、pip 或 MCP。整个目录可单独复制到支持 Skill 的 agent 中使用。
 
 在 Codex 中安装到技能目录（默认 `~/.codex/skills`；已有同名安装时先确认其内容）：
 
@@ -38,6 +38,15 @@ JSON
 五个命令使用下文相应 MCP 工具的 JSON 参数与业务结果字段。Python 的 `contentSourceUrl` 限制为 HTTP(S) URL；图片或参数校验失败均返回 `INVALID_ARGUMENT`。所有参数默认从 stdin 读取，也可用 `--input /absolute/path/params.json` 读取 UTF-8 JSON 文件。`--help` 查看命令列表。
 
 Python stdout 直接输出一个 JSON 对象；业务成功退出码为 0，失败为 1，用法错误为 2。token 只在单次进程内按 `expires_in` 缓存，提前 60 秒失效；每次启动 CLI 重新获取，不在磁盘存储凭据或 token。完整操作说明见 [SKILL.md](skills/wechat-official-account/SKILL.md)。
+
+Windows PowerShell 可直接使用仓库中的脚本：
+
+```powershell
+'{"imagePath":"C:/wechat/covers/cover.png"}' | Set-Content -Encoding UTF8 .\image-params.json
+py -3 .\skills\wechat-official-account\scripts\wechat.py upload-cover --input .\image-params.json
+```
+
+由宿主设置 `WECHAT_COVER_DIR=C:/wechat/covers` 及公众号凭据。`--input` 接受带或不带 BOM 的 UTF-8 JSON；stdin/stdout/stderr 统一使用 UTF-8。旧版 PowerShell 建议使用参数文件，避免管道编码改变中文。Windows 安装 Skill 时，可将整个 `skills/wechat-official-account` 目录复制到 `$env:CODEX_HOME/skills`，未配置时复制到 `$HOME/.codex/skills`。
 
 ## Node.js MCP：安装和接入
 
@@ -199,7 +208,9 @@ Python Skill 的离线回归仅使用标准库，不需要安装 Node 依赖：
 python3 -B scripts/python-skill-regression.py
 ```
 
-预期 14 项测试全部通过（`Ran 14 tests` / `OK`），覆盖参数、分页、统计、上传、草稿、token、文件边界和错误脱敏；并将脚本复制到临时目录，用 `python3 -S` 验证可脱离仓库及第三方包运行。测试使用固定假凭据和 HTTP 替身，不联网。
+预期 18 项测试全部通过（`Ran 18 tests` / `OK`），覆盖参数、分页、统计、上传、草稿、token、文件边界和错误脱敏；并将脚本复制到临时目录，用 `python3 -S` 验证可脱离仓库及第三方包运行。测试使用固定假凭据和 HTTP 替身，不联网。
+
+Windows 兼容回归覆盖缺少 Unix 文件标志时的上传/草稿、二进制字节保留、文件替换拒绝，以及非 UTF-8 默认流和 BOM 输入。本次在 Linux 上通过这些模拟测试，尚未在原生 Windows 上实测。Windows 运行完整回归需开启开发者模式或具备创建符号链接的权限；符号链接测试不跳过。
 
 原有 Node.js MCP 的回归：
 

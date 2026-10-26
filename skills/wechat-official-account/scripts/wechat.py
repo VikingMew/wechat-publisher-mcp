@@ -114,11 +114,22 @@ def read_image(file_path, article_image=False):
         ext = resolved.suffix.lower()
         if ext not in allowed:
             invalid("图片实际文件格式不受支持")
-        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before = resolved.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            invalid("图片必须是普通文件")
+        # Windows needs binary mode and does not provide the Unix open flags.
+        flags = os.O_RDONLY
+        for flag in ("O_BINARY", "O_NOFOLLOW", "O_NONBLOCK"):
+            flags |= getattr(os, flag, 0)
+        fd = os.open(resolved, flags)
         with os.fdopen(fd, "rb") as handle:
             info = os.fstat(handle.fileno())
             if not stat.S_ISREG(info.st_mode):
                 invalid("图片必须是普通文件")
+            # Keep the path boundary when O_NOFOLLOW is unavailable: check the
+            # opened file identity and re-resolve links/junctions before reading.
+            if not os.path.samestat(before, info) or resolved.resolve(strict=True) != resolved:
+                invalid("图片路径在校验期间发生变化")
             if info.st_size > MAX_IMAGE_SIZE:
                 invalid("图片不能超过 1 MB")
             data = handle.read(MAX_IMAGE_SIZE + 1)
@@ -285,7 +296,7 @@ def main(argv=None):
         if args.input == "-":
             source = sys.stdin.read()
         else:
-            source = Path(args.input).read_text(encoding="utf-8")
+            source = Path(args.input).read_text(encoding="utf-8-sig")
         params = json.loads(source)
         result = execute(args.command, params)
     except (OSError, ValueError):
@@ -295,4 +306,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    # Windows redirected streams otherwise use the active legacy code page.
+    sys.stdin.reconfigure(encoding="utf-8-sig")
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     sys.exit(main())
