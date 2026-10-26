@@ -1,6 +1,7 @@
 ## Environment
 
-- 本仓是 Node.js ESM 项目；`package.json` 的 `type` 为 `module`，源码导入保持 ESM 语法和 `.js` 扩展名。
+- 本仓提供 Node.js MCP 与用户明确要求的独立 Python Skill 两种交付。Node 部分是 ESM；`package.json` 的 `type` 为 `module`，源码导入保持 ESM 语法和 `.js` 扩展名。
+- `skills/wechat-official-account/` 是可独立复制的 Skill，运行时使用 Python 3.10+ 标准库、Linux/macOS，不依赖 Node、MCP 或第三方 Python 包。
 - 使用 Node.js 18+、npm 8+。仓库不提交 `node_modules/`；在运行任何依赖 npm 的脚本前先执行 `npm ci`。
 - `@modelcontextprotocol/sdk` 固定为 `1.15.0`。除非票面明确要求，不要改依赖、版本或 lockfile。
 - 微信凭据仅由服务进程环境变量 `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 注入。封面和正文图片共用允许目录，由 `WECHAT_COVER_DIR` 指定，未设置时为当前工作目录下的 `./covers`。
@@ -9,7 +10,7 @@
 
 ### 所有权与边界
 
-- agent 可在票面授权后修改 `src/**`、`scripts/**`，以及 `package.json` 的 `scripts` 段；每次只修改当前票面列出的路径和行为。
+- agent 可在票面授权后修改 `src/**`、`scripts/**`、`skills/wechat-official-account/**`，以及 `package.json` 的 `scripts` 段；每次只修改当前票面列出的路径和行为。
 - 微信公众平台后台配置、IP 白名单、公众号权限和密钥轮换属于宿主/发布侧，不在本仓实现。
 - `.github/**` 属于宿主/发布侧。除非票面明确要求 CI 或发布配置变更，agent 不得修改。
 
@@ -22,6 +23,8 @@
 ### 数据流
 
 - 调用链为：Muse/agent → MCP stdio 服务 → `api.weixin.qq.com` → 微信公众号。MCP 服务负责工具参数校验、图片校验/上传、微信 API 调用和返回字段映射。正文 HTML 不作转换。
+- Python Skill 调用链为：agent/用户 → `skills/wechat-official-account/scripts/wechat.py` → 微信 API。命令从 stdin 或 `--input` 文件读取 JSON；stdout 输出业务 JSON，退出码 0/1 表示成功/失败，命令用法错误为 2。图片读取、HTTP、字段映射均在 Python 内实现，不调用 Node。
+- Python token 仅缓存在单个进程的 API 实例内，按 `expires_in` 提前 60 秒失效，不落盘。每次 CLI 启动重新获取；与 MCP 不共享 token 缓存。
 - `src/services/WeChatAPI.js` 在进程内缓存 `access_token`，有效期采用接口返回的 `expires_in`，并提前 60 秒视为失效；缓存过期后的下一次调用重新获取。离线回归夹具返回 `expires_in: 7200`。
 - 不得把仓内没有实现或来源的配额写成事实；本仓没有“每日 2000 次”配额实现或依据。
 
@@ -33,6 +36,7 @@
 - `wechat_upload_cover`：接收 `imagePath`，上传永久图片素材并返回 `mediaId`，可用于草稿的 `thumbMediaId`。
 - `wechat_upload_article_image`：接收 `imagePath`，调用 `media/uploadimg` 并返回 `url`；仅接受 JPG/JPEG/PNG。调用方将 URL 放入正文 HTML。两个上传工具都受 `WECHAT_COVER_DIR`、1 MB 和文件校验约束，上传失败不返回成功结果。
 - MCP 返回 `content[0].text` 内的 JSON；操作成功含 `success: true`，操作失败含 `success: false`、`error`、`message` 并设置 `isError: true`。协议层 schema 拒绝由 MCP SDK 返回错误。
+- Python 命令依次为 `list-articles`、`get-article-stats`、`create-draft`、`upload-cover`、`upload-article-image`；使用上述 JSON 参数和业务字段，结果直接输出为 JSON。Python 的 `contentSourceUrl` 限制为 HTTP(S)，参数及图片校验失败均为 `INVALID_ARGUMENT`。凭据不得进入 CLI 参数或输入 JSON。
 
 ## Code Value Rules
 
@@ -54,6 +58,8 @@
 - No owner: true。当前登记计划是：本仓无 docs 体系，因此没有 owner 文档需要同步；`AGENTS.md` 是第一份面向 agent 的契约文档。未来若需正式分层设计文档或将本契约升级为正式规范，应另开设计票登记新 L3 owner 或并入已有 owner，不在无关票面中预置。
 
 ## Tests and Validation
+
+- Python Skill 回归：`python3 -B scripts/python-skill-regression.py`，预期 14 项通过（`Ran 14 tests` / `OK`）；不需要 npm，不使用真实凭据、不联网。覆盖独立拷贝在 `python3 -S` 下执行、API 字段映射、图片边界、上传/草稿及错误脱敏。
 
 - 首次验证或依赖清理后安装锁定依赖：
 
@@ -89,9 +95,10 @@
 
    ```bash
    node --experimental-vm-modules scripts/offline-regression.mjs
+   python3 -B scripts/python-skill-regression.py
    ```
 
-   通过标准：22 项全部通过，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`。
+   通过标准：Node 22 项全部通过，末行是 `TOTAL 22/22 PASS (offline mocks; no network)`；Python 14 项通过，输出 `OK`。
 
 3. 补丁格式门禁：
 
@@ -120,7 +127,7 @@
 
 以下四条是硬边界，违反任何一条即实现错误：
 
-1. **stdout 零污染。** MCP stdio 的 stdout 只承载 JSON-RPC 协议；所有日志一律写 stderr。违反会污染协议帧、导致客户端解析失败，因此属于实现错误。
+1. **stdout 零污染。** MCP stdio 的 stdout 只承载 JSON-RPC 协议；Python CLI 的业务命令 stdout 只输出结果 JSON。所有诊断日志一律写 stderr。违反会污染协议帧或 JSON、导致客户端解析失败，因此属于实现错误。
 2. **凭据只经环境变量。** `WECHAT_APP_ID`、`WECHAT_APP_SECRET` 不得进入工具 schema，不得打印、入库、写入文件或进入日志。违反会造成凭据泄露并破坏宿主密钥边界，因此属于实现错误。
 3. **只存草稿，不预览或正式发布。** 写操作止于封面/正文图片上传及 `draft/add`；不注册预览/发布工具，不调用 `freepublish/submit`、群发或预览接口。不得通过参数或旧入口恢复发布。违反可能造成未授权真实发布，因此属于实现错误。
 4. **封面和正文图片路径受 `WECHAT_COVER_DIR` 约束。** 默认目录为 `./covers`；不得绕过 realpath/符号链接边界、普通文件、1 MB 上限和 PNG/JPEG/GIF/WebP 图片魔数校验；正文图片仅接受 PNG/JPEG。违反可能读取或上传允许目录外文件，因此属于实现错误。

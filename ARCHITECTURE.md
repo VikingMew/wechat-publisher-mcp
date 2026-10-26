@@ -1,6 +1,6 @@
 # WeChat Publisher MCP Architecture
 
-本服务通过 MCP stdio 提供公众号历史文章、统计查询、图片上传和 HTML 草稿创建。
+本仓通过 Node.js MCP stdio 服务和独立 Python Skill 提供公众号历史文章、统计查询、图片上传和 HTML 草稿创建。
 
 ## 模块与数据流
 
@@ -13,6 +13,20 @@ MCP client
 ```
 
 `src/utils/validator.js` 负责本地图片文件边界检查；`src/utils/logger.js` 只写 stderr。`src/index.js` 提供程序入口，包的 bin 和 `npm start` 使用 `src/server.js`。
+
+## Python Skill
+
+`skills/wechat-official-account/SKILL.md` 提供 agent 操作指导；`scripts/wechat.py` 是随 Skill 分发的独立 Python CLI，不依赖仓库其他文件、Node、MCP 或第三方包。运行环境是 Python 3.10+、Linux/macOS。
+
+```text
+agent / CLI user
+  → wechat.py（JSON 参数、图片校验、token、HTTP、业务字段映射）
+  → api.weixin.qq.com
+```
+
+五个 Python 命令与下表五项业务操作对应，使用同样的微信接口和业务字段。输入从 stdin 或 `--input` 文件读取，输出直接为 JSON；退出码 0 / 1 表示业务成功 / 失败，命令用法错误为 2。`contentSourceUrl` 只接受 HTTP(S)，输入和图片校验失败统一为 `INVALID_ARGUMENT`。
+
+Python 使用 `urllib.request` 发送 JSON 和 multipart 请求，图片上传直接使用已验证的内存字节。token 只在单次进程的 API 实例内缓存，提前 60 秒失效；每次 CLI 调用重新获取，不使用磁盘缓存，也不与 MCP 共享状态。两种交付均只从环境读取凭据，不自动重试写入。
 
 ## 微信接口对应关系
 
@@ -56,8 +70,11 @@ MCP client
 | --- | --- | --- |
 | 查询、图片上传与存草稿 | server.js / wechat-articles.js / WeChatAPI.js | 工具清单、无发布请求、真实 stdio 握手 |
 | 独立图片上传 | uploadCover / uploadArticleImage | multipart、结果字段、格式/路径限制、失败脱敏、上传结果组成草稿 |
+| 独立 Python Skill | skills/wechat-official-account/scripts/wechat.py | Python 离线 HTTP 替身、CLI JSON/退出码、复制后在 python3 -S 下运行 |
 | HTML 不转换 | createDraft | 对比提交正文的完整字符串 |
 | 分页和累计统计 | listArticles / getArticleStats | 多图文、末页、空结果、缺失指标、累计快照 |
 | 凭据、token、图片、日志边界 | WeChatAPI.js / validator.js / logger.js | 环境缺失、轮换/过期、路径/魔数、日志隐私 |
 
 `scripts/offline-regression.mjs` 共 22 项，HTTP 使用替身，Zod 和 MCP SDK 使用实际锁定依赖；stdio 子进程只调用无凭据及无效参数路径，不访问真实微信。
+
+`scripts/python-skill-regression.py` 共 14 项，只使用标准库、HTTP 替身、固定假凭据和临时目录，验证 Python 五项操作及其文件、凭据、错误和命令行边界，不访问真实微信。

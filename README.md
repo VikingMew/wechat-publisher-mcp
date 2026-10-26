@@ -1,20 +1,45 @@
-# 微信公众号 MCP 服务
+# 微信公众号工具：Python Skill / MCP
 
-通过 MCP stdio 读取本公众号已发布文章、查询图文统计、上传封面和正文图片，并将准备好的 HTML 保存到草稿箱。
+提供可独立使用的 Python Skill 和 Node.js MCP 服务，用于读取本公众号已发布文章、查询图文统计、上传封面和正文图片，并将准备好的 HTML 保存到草稿箱。
 
-当前提供五个工具：
+两种方式覆盖五项操作：
 
-| 工具 | 用途 |
-| --- | --- |
-| `wechat_list_articles` | 分页读取已发布文章信息，可选包含正文 HTML |
-| `wechat_get_article_stats` | 按发表日期读取阅读、分享、收藏等累计统计 |
-| `wechat_create_draft` | 保存单篇 HTML 草稿，返回草稿 ID |
-| `wechat_upload_cover` | 上传永久封面素材，返回素材 ID |
-| `wechat_upload_article_image` | 上传正文图片，返回微信图片 URL |
+| MCP 工具 | Python 命令 | 用途 |
+| --- | --- | --- |
+| `wechat_list_articles` | `list-articles` | 分页读取已发布文章信息，可选包含正文 HTML |
+| `wechat_get_article_stats` | `get-article-stats` | 按发表日期读取阅读、分享、收藏等累计统计 |
+| `wechat_create_draft` | `create-draft` | 保存单篇 HTML 草稿，返回草稿 ID |
+| `wechat_upload_cover` | `upload-cover` | 上传永久封面素材，返回素材 ID |
+| `wechat_upload_article_image` | `upload-article-image` | 上传正文图片，返回微信图片 URL |
 
 已删除 Markdown 转换、自动封面生成、发送预览、正式发布及旧发布状态查询入口。服务不处理排版设计；正文 HTML 由调用方准备。
 
-## 安装和接入
+## Python Skill：直接使用
+
+Skill 位于 [`skills/wechat-official-account/`](skills/wechat-official-account/SKILL.md)。需要 **Python 3.10+、Linux/macOS**，只使用标准库，无需 Node.js、npm、pip 或 MCP。整个目录可单独复制到支持 Skill 的 agent 中使用。
+
+在 Codex 中安装到技能目录（默认 `~/.codex/skills`；已有同名安装时先确认其内容）：
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/wechat-official-account "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+在新会话中用 `$wechat-official-account` 调用，例如“用 `$wechat-official-account` 读取历史文章”或“上传这张封面并把这篇 HTML 存到草稿箱”。凭据和图片目录使用下方环境变量表，需由宿主注入；安装 Skill 本身不包含凭据。
+
+也可直接运行脚本，不需要 agent：
+
+```bash
+python3 skills/wechat-official-account/scripts/wechat.py list-articles <<'JSON'
+{"offset":0,"count":20,"includeContent":false}
+JSON
+```
+
+五个命令使用下文相应 MCP 工具的 JSON 参数与业务结果字段。Python 的 `contentSourceUrl` 限制为 HTTP(S) URL；图片或参数校验失败均返回 `INVALID_ARGUMENT`。所有参数默认从 stdin 读取，也可用 `--input /absolute/path/params.json` 读取 UTF-8 JSON 文件。`--help` 查看命令列表。
+
+Python stdout 直接输出一个 JSON 对象；业务成功退出码为 0，失败为 1，用法错误为 2。token 只在单次进程内按 `expires_in` 缓存，提前 60 秒失效；每次启动 CLI 重新获取，不在磁盘存储凭据或 token。完整操作说明见 [SKILL.md](skills/wechat-official-account/SKILL.md)。
+
+## Node.js MCP：安装和接入
 
 需要 Node.js 18+、npm 8+。在仓库目录执行：
 
@@ -35,17 +60,17 @@ MCP 客户端配置示例，将路径替换为本机绝对路径：
 }
 ```
 
-通过宿主的安全环境注入功能或父进程环境提供以下变量。真实凭据不要写进配置文件、仓库或 AI 对话。
+两种方式均通过宿主的安全环境注入功能或父进程环境提供以下变量。真实凭据不要写进配置文件、仓库或 AI 对话。
 
 | 变量 | 说明 |
 | --- | --- |
 | `WECHAT_APP_ID` | 必需，公众号 AppID |
 | `WECHAT_APP_SECRET` | 必需，公众号 AppSecret |
 | `WECHAT_COVER_DIR` | 可选，本地封面和正文图片的允许目录；默认服务工作目录下的 `./covers` |
-| `DEBUG` | 设置为非空值时输出调试日志 |
-| `NODE_ENV` | 设为 `production` 时关闭 INFO 日志 |
+| `DEBUG` | 仅 Node MCP：设置为非空值时输出调试日志 |
+| `NODE_ENV` | 仅 Node MCP：设为 `production` 时关闭 INFO 日志 |
 
-所有日志写 stderr，stdout 只传输 JSON-RPC。服务仅支持 stdio，没有 HTTP 监听或 `--help` / `--version` 命令行功能。应由 MCP 客户端直接启动 Node，不使用 `npm start` 作为 stdio 启动命令。
+MCP 服务所有日志写 stderr，stdout 只传输 JSON-RPC。MCP 仅支持 stdio，没有 HTTP 监听或 `--help` / `--version` 命令行功能。应由 MCP 客户端直接启动 Node，不使用 `npm start` 作为 stdio 启动命令。
 
 公众号侧需要配置调用机器的出口 IP 白名单，并具备对应的草稿、发布记录及数据分析接口权限。这些配置由公众号管理员处理。本服务不会绕过权限、抓取后台页面或读取其他公众号的数据。
 
@@ -168,6 +193,16 @@ MCP 客户端配置示例，将路径替换为本机绝对路径：
 
 ## 验证
 
+Python Skill 的离线回归仅使用标准库，不需要安装 Node 依赖：
+
+```bash
+python3 -B scripts/python-skill-regression.py
+```
+
+预期 14 项测试全部通过（`Ran 14 tests` / `OK`），覆盖参数、分页、统计、上传、草稿、token、文件边界和错误脱敏；并将脚本复制到临时目录，用 `python3 -S` 验证可脱离仓库及第三方包运行。测试使用固定假凭据和 HTTP 替身，不联网。
+
+原有 Node.js MCP 的回归：
+
 ```bash
 npm ci
 node --experimental-vm-modules scripts/offline-regression.mjs
@@ -206,3 +241,5 @@ TOTAL 22/22 PASS (offline mocks; no network)
 联调发现旧统计接口 `getarticletotal` 返回 `47009`（接口已下线），已改用 `getarticletotaldetail`；本项目不回退到旧接口。
 
 以上结果证明本次测试号的接口连通和草稿写入链路可用，不代表所有账号均有相同权限。测试号没有已发表文章及统计记录，真实非空列表、多页历史数据和阅读、分享、收藏人数仍需使用有数据的公众号验收；离线回归覆盖这些返回结构和字段映射。
+
+同日新增的 Python Skill 已通过纯 Python CLI（使用 `python3 -S`，无第三方包）完成五项真实调用：历史列表和统计均成功返回空列表，永久封面与正文图片上传成功，草稿创建成功。另通过微信草稿详情接口读回，确认标题及正文图片资源匹配。本次留下了一篇 `Python Skill 完整链路测试（可删除）` 草稿及测试图片，未发送预览或正式发布；凭据及接口原始响应未保存到文件。
